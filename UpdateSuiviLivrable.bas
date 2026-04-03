@@ -1,9 +1,9 @@
 Option Explicit
 
 Public Sub UpdateSuiviLivrable()
-    ' -- Variable declarations --
     Dim lockPath As String
     Dim statusPath As String
+    Dim lockCreated As Boolean
     Dim crArr As Variant
     Dim powqArr As Variant
     Dim livArr As Variant
@@ -27,30 +27,40 @@ Public Sub UpdateSuiviLivrable()
     Dim wsTmp As Worksheet
     Dim insertRow As Long
     Dim firstNewRow As Long
-    Dim livRow As Long
-    Dim srcRow As Long
-    Dim bv As String
-    Dim cv As String
-    Dim dv As String
-    Dim ev As String
-    Dim bvK As String
-    Dim cvK As String
-    Dim dvK As String
-    Dim evK As String
     Dim iterItem As Variant
-    Dim lockCreated As Boolean
+    Dim bv As String, cv As String, dv As String, ev As String
+    Dim bvK As String, cvK As String, dvK As String, evK As String
+    Dim rr As Long
+    Dim blockEnd As Long
+    Dim blockStartRow As Long
     Dim insertedCount As Long
     Dim updatedCount As Long
+    Dim totalInsertedRows As Long
     Dim uniqueSTRs As Object
     Dim strsToInsert As Object
     Dim strsToUpdate As Object
     Dim strKey As Variant
-    Dim blockSize As Long
-    Dim blockEnd As Long
-    Dim rr As Long
     Dim matchRows As Collection
-    Dim lastTmpCol As Long
     Dim matchItem As Variant
+    Dim lastTmpCol As Long
+    Dim sprintMap As Object
+    Dim blockInfo As Object
+    Dim strSprints As Collection
+    Dim maxSprintKey As String
+    Dim rangesCol As Collection
+    Dim tmplPair As Variant
+    Dim tmplStart As Long
+    Dim tmplEnd As Long
+    Dim nrows As Long
+    Dim sp As Variant
+    Dim segIdx As Long
+    Dim yp As Variant
+    Dim ycol As Collection
+    Dim br As Variant
+    Dim i As Long
+    Dim adl1Start As Long
+    Dim swdsStart As Long
+    Dim msg As String
 
     On Error GoTo ErrHandler
 
@@ -83,7 +93,7 @@ Public Sub UpdateSuiviLivrable()
     Application.StatusBar = "Suivi Update: Loading data..."
 
     ' ---------------------------------------------------------
-    '  LOAD SHEET DATA INTO ARRAYS (one-time reads)
+    '  LOAD SHEET DATA INTO ARRAYS
     ' ---------------------------------------------------------
     crArr = LoadSheetData(ThisWorkbook.Sheets(SH_CR))
     powqArr = LoadSheetData(ThisWorkbook.Sheets(SH_EXTRACT))
@@ -108,7 +118,7 @@ Public Sub UpdateSuiviLivrable()
     End If
 
     ' ---------------------------------------------------------
-    '  COMPUTE DIFF  (new STR values + modified rows)
+    '  COMPUTE DIFF (new STR values + modified rows)
     ' ---------------------------------------------------------
     Application.StatusBar = "Suivi Update: Computing changes..."
     oldJson = ReadTextFile(statusPath)
@@ -165,7 +175,6 @@ NextCrRow:
     Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
     Set wsTmp = ThisWorkbook.Sheets(SH_TMP)
     livArr = LoadSheetData(wsLiv)
-    blockSize = TMP_LAST_ROW - TMP_FIRST_ROW + 1
 
     ' ---------------------------------------------------------
     '  CLASSIFY: collect unique STRs, split into insert vs update
@@ -193,89 +202,128 @@ NextCrRow:
     Next strKey
 
     ' ---------------------------------------------------------
-    '  INSERT: copy full template block for each new unique STR
+    '  INSERT: dynamic sprint blocks per STR
     ' ---------------------------------------------------------
     insertedCount = 0
+    totalInsertedRows = 0
 
     If strsToInsert.Count > 0 Then
         Application.StatusBar = "Suivi Update: Inserting " & strsToInsert.Count & " STR block(s)..."
 
         lastTmpCol = wsTmp.UsedRange.Column + wsTmp.UsedRange.Columns.Count - 1
+        Set sprintMap = BuildSprintRangeMap(wsTmp)
+        Set blockInfo = CreateObject("Scripting.Dictionary")
 
         firstNewRow = GetLastDataRow(wsLiv, COL_B) + 1
         If firstNewRow < LIV_FIRST_ROW Then firstNewRow = LIV_FIRST_ROW
         insertRow = firstNewRow
 
-        ' -- Pass 1: copy template formatting + values, set STR, add borders --
         For Each strKey In strsToInsert.Keys
-            blockEnd = insertRow + blockSize - 1
+            Set strSprints = GetSprintsForSTR(crArr, CStr(strKey))
+            maxSprintKey = ""
+            For i = strSprints.Count To 1 Step -1
+                If sprintMap.Exists(CStr(strSprints(i))) Then
+                    maxSprintKey = CStr(strSprints(i))
+                    Exit For
+                End If
+            Next i
 
-            ' Copy formatting for all columns from template
-            wsTmp.Range(wsTmp.Cells(TMP_FIRST_ROW, 1), _
-                        wsTmp.Cells(TMP_LAST_ROW, lastTmpCol)).Copy
-            wsLiv.Cells(insertRow, 1).PasteSpecial Paste:=xlPasteFormats
-            Application.CutCopyMode = False
+            blockStartRow = insertRow
 
-            ' Copy values for cols C, D, E from template
-            wsTmp.Range(wsTmp.Cells(TMP_FIRST_ROW, COL_C), _
-                        wsTmp.Cells(TMP_LAST_ROW, COL_E)).Copy
-            wsLiv.Cells(insertRow, COL_C).PasteSpecial Paste:=xlPasteValues
-            Application.CutCopyMode = False
+            For segIdx = 1 To 2
+                If segIdx = 1 Then adl1Start = insertRow
+                If segIdx = 2 Then swdsStart = insertRow
 
-            ' Set column B to actual STR value
-            For rr = insertRow To blockEnd
-                wsLiv.Cells(rr, COL_B).Value = CStr(strKey)
-            Next rr
+                For Each sp In strSprints
+                    If sprintMap.Exists(CStr(sp)) Then
+                        Set rangesCol = sprintMap(CStr(sp))
+                        If segIdx <= rangesCol.Count Then
+                            tmplPair = rangesCol(segIdx)
+                            tmplStart = tmplPair(0)
+                            tmplEnd = tmplPair(1)
+                            nrows = tmplEnd - tmplStart + 1
 
-            ' Thick border at the bottom of the block across all columns
-            With wsLiv.Range(wsLiv.Cells(blockEnd, 1), _
-                             wsLiv.Cells(blockEnd, lastTmpCol)).Borders(xlEdgeBottom)
-                .LineStyle = xlContinuous
-                .Weight = xlMedium
-            End With
+                            wsTmp.Range(wsTmp.Cells(tmplStart, 1), wsTmp.Cells(tmplEnd, lastTmpCol)).Copy
+                            wsLiv.Cells(insertRow, 1).PasteSpecial Paste:=xlPasteFormats
+                            Application.CutCopyMode = False
 
-            insertRow = insertRow + blockSize
-            insertedCount = insertedCount + 1
+                            wsTmp.Range(wsTmp.Cells(tmplStart, COL_C), wsTmp.Cells(tmplEnd, COL_E)).Copy
+                            wsLiv.Cells(insertRow, COL_C).PasteSpecial Paste:=xlPasteValues
+                            Application.CutCopyMode = False
+
+                            For rr = insertRow To insertRow + nrows - 1
+                                wsLiv.Cells(rr, COL_B).Value = CStr(strKey)
+                            Next rr
+
+                            If maxSprintKey <> "" And CStr(sp) = maxSprintKey And sprintMap.Exists("3") Then
+                                Set ycol = sprintMap("3")
+                                If segIdx <= ycol.Count Then
+                                    yp = ycol(segIdx)
+                                    ApplyYellowSectionUtoX wsLiv, insertRow, insertRow + nrows - 1, wsTmp, yp(0), yp(1)
+                                End If
+                            End If
+
+                            insertRow = insertRow + nrows
+                            totalInsertedRows = totalInsertedRows + nrows
+                        End If
+                    End If
+                Next sp
+
+                If segIdx = 1 Then
+                    If insertRow > adl1Start Then
+                        ApplyLightOutlineBorder wsLiv, adl1Start, insertRow - 1, lastTmpCol
+                    End If
+                Else
+                    If insertRow > swdsStart Then
+                        ApplyLightOutlineBorder wsLiv, swdsStart, insertRow - 1, lastTmpCol
+                    End If
+                End If
+            Next segIdx
+
+            If insertRow > blockStartRow Then
+                blockEnd = insertRow - 1
+                ApplyHardOutlineBorder wsLiv, blockStartRow, blockEnd, lastTmpCol
+                blockInfo.Add CStr(strKey), Array(blockStartRow, blockEnd)
+                insertedCount = insertedCount + 1
+            End If
         Next strKey
 
-        ' Reload array so pass 2 reads the fresh values
         livArr = LoadSheetData(wsLiv)
 
-        ' -- Pass 2: compute formula columns for every inserted row --
-        insertRow = firstNewRow
         For Each strKey In strsToInsert.Keys
-            blockEnd = insertRow + blockSize - 1
-            For rr = insertRow To blockEnd
-                bv = CStr(livArr(rr, COL_B) & "")
-                cv = CStr(livArr(rr, COL_C) & "")
-                dv = CStr(livArr(rr, COL_D) & "")
-                ev = CStr(livArr(rr, COL_E) & "")
+            If blockInfo.Exists(CStr(strKey)) Then
+                br = blockInfo(CStr(strKey))
+                For rr = br(0) To br(1)
+                    bv = CStr(livArr(rr, COL_B) & "")
+                    cv = CStr(livArr(rr, COL_C) & "")
+                    dv = CStr(livArr(rr, COL_D) & "")
+                    ev = CStr(livArr(rr, COL_E) & "")
 
-                wsLiv.Cells(rr, COL_F).Value = ComputeColF(bv, cv, dv, ev, crArr)
-                wsLiv.Cells(rr, COL_G).Value = ComputeColG(bv, cv, dv, ev, crArr)
-                wsLiv.Cells(rr, COL_H).Value = ComputeColH(bv, cv, dv, ev, powqArr)
-                wsLiv.Cells(rr, COL_I).Value = ComputeColI(bv, cv, dv, ev, powqArr, finRefCol)
-                wsLiv.Cells(rr, COL_J).Value = ComputeColJ(bv, cv, dv, ev, powqArr)
+                    wsLiv.Cells(rr, COL_F).Value = ComputeColF(bv, cv, dv, ev, crArr)
+                    wsLiv.Cells(rr, COL_G).Value = ComputeColG(bv, cv, dv, ev, crArr)
+                    wsLiv.Cells(rr, COL_H).Value = ComputeColH(bv, cv, dv, ev, powqArr)
+                    wsLiv.Cells(rr, COL_I).Value = ComputeColI(bv, cv, dv, ev, powqArr, finRefCol)
+                    wsLiv.Cells(rr, COL_J).Value = ComputeColJ(bv, cv, dv, ev, powqArr)
 
-                If rr + 1 <= UBound(livArr, 1) Then
-                    bvK = CStr(livArr(rr + 1, COL_B) & "")
-                    cvK = CStr(livArr(rr + 1, COL_C) & "")
-                    dvK = CStr(livArr(rr + 1, COL_D) & "")
-                    evK = CStr(livArr(rr + 1, COL_E) & "")
-                Else
-                    bvK = "": cvK = "": dvK = "": evK = ""
-                End If
-                wsLiv.Cells(rr, COL_K).Value = ComputeColK(bvK, cvK, dvK, evK, crArr)
+                    If rr + 1 <= UBound(livArr, 1) Then
+                        bvK = CStr(livArr(rr + 1, COL_B) & "")
+                        cvK = CStr(livArr(rr + 1, COL_C) & "")
+                        dvK = CStr(livArr(rr + 1, COL_D) & "")
+                        evK = CStr(livArr(rr + 1, COL_E) & "")
+                    Else
+                        bvK = "": cvK = "": dvK = "": evK = ""
+                    End If
+                    wsLiv.Cells(rr, COL_K).Value = ComputeColK(bvK, cvK, dvK, evK, crArr)
 
-                wsLiv.Cells(rr, COL_O).Value = ComputeColO(bv, cv, dv, ev, powqArr)
-                wsLiv.Cells(rr, COL_T).Value = ComputeColT(bv, cv, dv, ev, powqArr)
-            Next rr
-            insertRow = insertRow + blockSize
+                    wsLiv.Cells(rr, COL_O).Value = ComputeColO(bv, cv, dv, ev, powqArr)
+                    wsLiv.Cells(rr, COL_T).Value = ComputeColT(bv, cv, dv, ev, powqArr)
+                Next rr
+            End If
         Next strKey
     End If
 
     ' ---------------------------------------------------------
-    '  UPDATE: recompute formula columns for all Livrables rows of modified STRs
+    '  UPDATE: recompute formula columns for modified STRs
     ' ---------------------------------------------------------
     updatedCount = 0
 
@@ -323,9 +371,8 @@ NextCrRow:
     jsonSnapshot = SerializeSnapshotToJson(crArr)
     WriteTextFile statusPath, jsonSnapshot
 
-    Dim msg As String
     msg = "Update completed successfully." & vbCrLf & _
-          insertedCount & " new STR block(s) inserted (" & blockSize & " rows each)." & vbCrLf & _
+          insertedCount & " new STR block(s) inserted (" & totalInsertedRows & " rows total)." & vbCrLf & _
           updatedCount & " existing STR(s) recomputed."
     MsgBox msg, vbInformation, "Suivi Update"
     GoTo Cleanup

@@ -1,51 +1,8 @@
 Option Explicit
 
-' DEPENDENCY: JsonConverter.bas must be imported into this VBA project.
-' Download from https://github.com/VBA-tools/VBA-JSON
-' Also requires: Tools > References > Microsoft Scripting Runtime (for Dictionary)
-
-' ---------------------------------------------------------
-'  SHEET & DATA CONSTANTS
-' ---------------------------------------------------------
-
-Public Const SH_CR         As String = "Suivi_CR"
-Public Const SH_LIV        As String = "Suivi_Livrables"
-Public Const SH_EXTRACT    As String = "PowQ_Extract"
-Public Const SH_UVR        As String = "PowQ_Suivi_UVR"
-Public Const SH_TMP        As String = "Suivi_Livrables_Tmp"
-
-Public Const CR_FIRST_ROW  As Long = 3
-Public Const LIV_FIRST_ROW As Long = 4
-Public Const CR_MAX_ROW    As Long = 9976
-
-' TODO-2: Template range in Suivi_Livrables_Tmp -- rows 4-33, cols B-E.
-'         Currently only row 4 is used as the formatting source.
-'         Adjust TMP_FIRST_ROW / TMP_LAST_ROW if a block of rows
-'         should be copied per STR.
-Public Const TMP_FIRST_ROW As Long = 4
-Public Const TMP_LAST_ROW  As Long = 33
-
-' ---------------------------------------------------------
-'  COLUMN INDEX CONSTANTS  (1-based, matching Excel columns)
-' ---------------------------------------------------------
-
-Public Const COL_A As Long = 1
-Public Const COL_B As Long = 2
-Public Const COL_C As Long = 3
-Public Const COL_D As Long = 4
-Public Const COL_E As Long = 5
-Public Const COL_F As Long = 6
-Public Const COL_G As Long = 7
-Public Const COL_H As Long = 8
-Public Const COL_I As Long = 9
-Public Const COL_J As Long = 10
-Public Const COL_K As Long = 11
-Public Const COL_L As Long = 12
-Public Const COL_O As Long = 15
-Public Const COL_T As Long = 20
-Public Const COL_U As Long = 21
-Public Const COL_Y As Long = 25
-Public Const COL_Z As Long = 26
+' DEPENDENCY: JsonConverter.bas (https://github.com/VBA-tools/VBA-JSON)
+' Also requires: Tools > References > Microsoft Scripting Runtime (Dictionary)
+' Constants are in Globals.bas
 
 ' ---------------------------------------------------------
 '  CONFIGURATION
@@ -54,18 +11,19 @@ Public Const COL_Z As Long = 26
 Private m_SharedFolder As String
 
 Public Function SHARED_FOLDER_PATH() As String
+    Dim dlg As Object
+    Dim p As String
+
     If m_SharedFolder <> "" Then
         SHARED_FOLDER_PATH = m_SharedFolder
         Exit Function
     End If
 
-    Dim dlg As Object
-    Set dlg = Application.FileDialog(4)  ' 4 = msoFileDialogFolderPicker
+    Set dlg = Application.FileDialog(4)
     With dlg
         .Title = "Select the shared folder for Suivi files (LOCK.txt, status.json)"
         .ButtonName = "Select"
         If .Show = -1 Then
-            Dim p As String
             p = .SelectedItems(1)
             If Right$(p, 1) <> "\" Then p = p & "\"
             m_SharedFolder = p
@@ -87,12 +45,13 @@ Public Sub ValidateRequiredSheets()
     Dim i As Long
     Dim ws As Worksheet
     Dim missing As String
+    Dim found As Boolean
+    Dim sheetList As String
 
     names = Array(SH_CR, SH_LIV, SH_EXTRACT, SH_TMP)
     missing = ""
 
     For i = LBound(names) To UBound(names)
-        Dim found As Boolean
         found = False
         For Each ws In ThisWorkbook.Worksheets
             If LCase(ws.Name) = LCase(CStr(names(i))) Then
@@ -107,7 +66,6 @@ Public Sub ValidateRequiredSheets()
     Next i
 
     If missing <> "" Then
-        Dim sheetList As String
         sheetList = ""
         For Each ws In ThisWorkbook.Worksheets
             If sheetList <> "" Then sheetList = sheetList & ", "
@@ -184,6 +142,16 @@ Private Function CDblSafe(v As Variant) As Double
         CDblSafe = CDbl(v)
     Else
         CDblSafe = 0
+    End If
+End Function
+
+Private Function IsValidPowQValue(v As Variant) As Boolean
+    If IsEmpty(v) Or IsNull(v) Or IsError(v) Then
+        IsValidPowQValue = False
+    ElseIf LCase(CStr(v & "")) = "nan" Or CStr(v & "") = "" Then
+        IsValidPowQValue = False
+    Else
+        IsValidPowQValue = True
     End If
 End Function
 
@@ -276,7 +244,6 @@ Public Function ParseSnapshotFromJson(jsonStr As String) As Object
 
     For Each item In coll
         strKey = CStr(item("STR"))
-
         Set cellsObj = item("cells")
         Set cellsDict = CreateObject("Scripting.Dictionary")
 
@@ -339,11 +306,223 @@ Public Function FindAllRowsBySTR(livArr As Variant, strVal As String) As Collect
 End Function
 
 ' ---------------------------------------------------------
-'  COLUMN F -- COUNTIFS(Suivi_CR!B=$B, C=$D, D=$E, J<>"")
+'  SPRINT HELPERS
 ' ---------------------------------------------------------
-' NB.SI.ENS / COUNTIFS on Suivi_CR.
-' Parameters B/C/D/E are Suivi_Livrable column values.
-' Cross-mapping: CR col B = param B, CR col C = param D, CR col D = param E.
+
+' Extracts a numeric sprint key from any value: 1, "1", "Sprint 1" -> "1"
+Public Function NormalizeSprintKey(v As Variant) As String
+    Dim s As String
+    Dim i As Long
+    Dim j As Long
+
+    If IsEmpty(v) Or IsNull(v) Then
+        NormalizeSprintKey = ""
+        Exit Function
+    End If
+    If IsNumeric(v) And Not VarType(v) = vbString Then
+        NormalizeSprintKey = CStr(CLng(CDbl(v)))
+        Exit Function
+    End If
+
+    s = Trim$(CStr(v & ""))
+    If s = "" Then
+        NormalizeSprintKey = ""
+        Exit Function
+    End If
+    If IsNumeric(s) Then
+        NormalizeSprintKey = CStr(CLng(CDbl(s)))
+        Exit Function
+    End If
+
+    For i = 1 To Len(s)
+        If Mid$(s, i, 1) >= "0" And Mid$(s, i, 1) <= "9" Then
+            j = i
+            Do While j <= Len(s) And Mid$(s, j, 1) >= "0" And Mid$(s, j, 1) <= "9"
+                j = j + 1
+            Loop
+            NormalizeSprintKey = Mid$(s, i, j - i)
+            Exit Function
+        End If
+    Next i
+    NormalizeSprintKey = s
+End Function
+
+' Returns sorted unique sprint keys from Suivi_CR col C for a given STR (col B).
+' Falls back to {"1","2","3"} if no sprints found.
+Public Function GetSprintsForSTR(crArr As Variant, strVal As String) As Collection
+    Dim seen As Object
+    Dim result As New Collection
+    Dim r As Long
+    Dim lStr As String
+    Dim sp As String
+    Dim arr() As String
+    Dim n As Long
+    Dim i As Long
+    Dim j As Long
+    Dim tmp As String
+    Dim k As Variant
+
+    Set seen = CreateObject("Scripting.Dictionary")
+    lStr = LCase(strVal)
+
+    For r = CR_FIRST_ROW To UBound(crArr, 1)
+        If LCase(CStr(crArr(r, COL_B) & "")) = lStr Then
+            sp = NormalizeSprintKey(crArr(r, COL_C))
+            If sp <> "" And Not seen.Exists(sp) Then seen(sp) = True
+        End If
+    Next r
+
+    If seen.Count = 0 Then
+        result.Add "1"
+        result.Add "2"
+        result.Add "3"
+        Set GetSprintsForSTR = result
+        Exit Function
+    End If
+
+    ReDim arr(0 To seen.Count - 1)
+    n = 0
+    For Each k In seen.Keys
+        arr(n) = CStr(k)
+        n = n + 1
+    Next k
+
+    For i = LBound(arr) To UBound(arr) - 1
+        For j = i + 1 To UBound(arr)
+            If SprintSortKey(arr(j)) < SprintSortKey(arr(i)) Then
+                tmp = arr(i): arr(i) = arr(j): arr(j) = tmp
+            End If
+        Next j
+    Next i
+
+    For i = LBound(arr) To UBound(arr)
+        result.Add arr(i)
+    Next i
+    Set GetSprintsForSTR = result
+End Function
+
+Private Function SprintSortKey(s As String) As Double
+    If IsNumeric(s) Then
+        SprintSortKey = CDbl(s)
+    Else
+        SprintSortKey = 1E+30
+    End If
+End Function
+
+' Maps each sprint key to its template row ranges: key -> Collection of Array(startRow, endRow).
+' Segment 1 = ADL1, segment 2 = SwDS.
+Public Function BuildSprintRangeMap(ws As Worksheet) As Object
+    Dim map As Object
+    Dim r As Long
+    Dim startR As Long
+    Dim curKey As String
+    Dim nk As String
+
+    Set map = CreateObject("Scripting.Dictionary")
+    startR = TMP_FIRST_ROW
+    curKey = NormalizeSprintKey(ws.Cells(TMP_FIRST_ROW, COL_D).Value)
+
+    For r = TMP_FIRST_ROW + 1 To TMP_LAST_ROW
+        nk = NormalizeSprintKey(ws.Cells(r, COL_D).Value)
+        If nk <> curKey Then
+            SprintMapAddRange map, curKey, startR, r - 1
+            startR = r
+            curKey = nk
+        End If
+    Next r
+    SprintMapAddRange map, curKey, startR, TMP_LAST_ROW
+
+    Set BuildSprintRangeMap = map
+End Function
+
+Private Sub SprintMapAddRange(map As Object, key As String, startR As Long, endR As Long)
+    Dim col As Collection
+    If key = "" Then Exit Sub
+    If map.Exists(key) Then
+        Set col = map(key)
+    Else
+        Set col = New Collection
+        map.Add key, col
+    End If
+    col.Add Array(startR, endR)
+End Sub
+
+' ---------------------------------------------------------
+'  FORMATTING HELPERS
+' ---------------------------------------------------------
+
+' Copies yellow background for cols U-X from template rows to destination rows.
+Public Sub ApplyYellowSectionUtoX(wsLiv As Worksheet, ByVal destStart As Long, ByVal destEnd As Long, _
+                                 wsTmp As Worksheet, ByVal srcStart As Long, ByVal srcEnd As Long)
+    Dim i As Long
+    Dim n As Long
+    n = destEnd - destStart + 1
+    If srcEnd - srcStart + 1 <> n Then Exit Sub
+    For i = 0 To n - 1
+        wsLiv.Range(wsLiv.Cells(destStart + i, COL_U), wsLiv.Cells(destStart + i, COL_X)).Interior.Color = _
+            wsTmp.Range(wsTmp.Cells(srcStart + i, COL_U), wsTmp.Cells(srcStart + i, COL_X)).Interior.Color
+    Next i
+End Sub
+
+' Thin gray outline for ADL1 / SwDS sub-blocks.
+Public Sub ApplyLightOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal bottomRow As Long, _
+                                  ByVal lastCol As Long)
+    Dim rng As Range
+    If topRow > bottomRow Then Exit Sub
+    Set rng = ws.Range(ws.Cells(topRow, 1), ws.Cells(bottomRow, lastCol))
+    With rng.Borders(xlEdgeTop)
+        .LineStyle = xlContinuous
+        .Weight = xlThin
+        .Color = RGB(150, 150, 150)
+    End With
+    With rng.Borders(xlEdgeBottom)
+        .LineStyle = xlContinuous
+        .Weight = xlThin
+        .Color = RGB(150, 150, 150)
+    End With
+    With rng.Borders(xlEdgeLeft)
+        .LineStyle = xlContinuous
+        .Weight = xlThin
+        .Color = RGB(150, 150, 150)
+    End With
+    With rng.Borders(xlEdgeRight)
+        .LineStyle = xlContinuous
+        .Weight = xlThin
+        .Color = RGB(150, 150, 150)
+    End With
+End Sub
+
+' Thick black outline for a full STR block.
+Public Sub ApplyHardOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal bottomRow As Long, _
+                                  ByVal lastCol As Long)
+    Dim rng As Range
+    If topRow > bottomRow Then Exit Sub
+    Set rng = ws.Range(ws.Cells(topRow, 1), ws.Cells(bottomRow, lastCol))
+    With rng.Borders(xlEdgeTop)
+        .LineStyle = xlContinuous
+        .Weight = xlMedium
+        .Color = RGB(0, 0, 0)
+    End With
+    With rng.Borders(xlEdgeBottom)
+        .LineStyle = xlContinuous
+        .Weight = xlMedium
+        .Color = RGB(0, 0, 0)
+    End With
+    With rng.Borders(xlEdgeLeft)
+        .LineStyle = xlContinuous
+        .Weight = xlMedium
+        .Color = RGB(0, 0, 0)
+    End With
+    With rng.Borders(xlEdgeRight)
+        .LineStyle = xlContinuous
+        .Weight = xlMedium
+        .Color = RGB(0, 0, 0)
+    End With
+End Sub
+
+' ---------------------------------------------------------
+'  COLUMN F -- COUNTIFS(Suivi_CR: B=$B, C=$D, D=$E, J<>"")
+' ---------------------------------------------------------
 
 Public Function ComputeColF(B As String, C As String, D As String, _
                             E As String, crArr As Variant) As Long
@@ -399,12 +578,14 @@ End Function
 ' ---------------------------------------------------------
 
 Public Function ComputeColH(B As String, C As String, D As String, _
-                            E As String, powqArr As Variant) As Double
+                            E As String, powqArr As Variant) As Variant
     Dim total As Double
+    Dim found As Boolean
     Dim r As Long
     Dim lB As String, lC As String, lD As String, lE As String
 
     total = 0
+    found = False
     lB = LCase(B): lC = LCase(C): lD = LCase(D): lE = LCase(E)
 
     For r = 2 To UBound(powqArr, 1)
@@ -412,17 +593,23 @@ Public Function ComputeColH(B As String, C As String, D As String, _
            LCase(CStr(powqArr(r, COL_C) & "")) = lE And _
            LCase(CStr(powqArr(r, COL_F) & "")) = lC And _
            LCase(CStr(powqArr(r, COL_U) & "")) = lD Then
-            total = total + CDblSafe(powqArr(r, COL_Y))
+            If IsValidPowQValue(powqArr(r, COL_Y)) And IsNumeric(powqArr(r, COL_Y)) Then
+                total = total + CDbl(powqArr(r, COL_Y))
+                found = True
+            End If
         End If
     Next r
 
-    ComputeColH = total
+    If found Then
+        ComputeColH = total
+    Else
+        ComputeColH = ""
+    End If
 End Function
 
 ' ---------------------------------------------------------
-'  COLUMN I -- VLOOKUP on PowQ_Extract col A -> "Fin Ref" column
+'  COLUMN I -- VLOOKUP PowQ_Extract col A -> "Fin Ref"
 ' ---------------------------------------------------------
-' Key: B & "/" & E & "/" & C & "/Sprint " & D
 
 Public Function ComputeColI(B As String, C As String, D As String, _
                             E As String, powqArr As Variant, _
@@ -441,7 +628,11 @@ Public Function ComputeColI(B As String, C As String, D As String, _
 
     For r = 2 To UBound(powqArr, 1)
         If LCase(CStr(powqArr(r, COL_A) & "")) = lKey Then
-            ComputeColI = CStr(powqArr(r, finRefCol) & "")
+            If IsValidPowQValue(powqArr(r, finRefCol)) Then
+                ComputeColI = CStr(powqArr(r, finRefCol) & "")
+            Else
+                ComputeColI = ""
+            End If
             Exit Function
         End If
     Next r
@@ -450,7 +641,7 @@ Public Function ComputeColI(B As String, C As String, D As String, _
 End Function
 
 ' ---------------------------------------------------------
-'  COLUMN J -- MAX(PowQ!I) where B=$B, C=$E, U=$D, F=$C, I<>""
+'  COLUMN J -- MAX(PowQ!I) where B=$B, C=$E, U=$D, F=$C
 ' ---------------------------------------------------------
 
 Public Function ComputeColJ(B As String, C As String, D As String, _
@@ -491,16 +682,11 @@ Public Function ComputeColJ(B As String, C As String, D As String, _
 End Function
 
 ' ---------------------------------------------------------
-'  COLUMN K -- Weighted average (IFS-based)
+'  COLUMN K -- Weighted average (IFS-based, row N+1 offset)
 ' ---------------------------------------------------------
-' IMPORTANT: B/C/D/E are from Suivi_Livrable row N+1 (offset).
-' TODO-4: Verify this +1 offset with the sheet owner before deploying.
-'
-' Cross-mapping for CR scan: CR col B = param B, CR col C = param D,
-'                            CR col D = param E.
 
 Public Function ComputeColK(B As String, C As String, D As String, _
-                            E As String, crArr As Variant) As String
+                            E As String, crArr As Variant) As Variant
     Dim numerator As Double
     Dim denominator As Double
     Dim r As Long
@@ -532,7 +718,7 @@ Public Function ComputeColK(B As String, C As String, D As String, _
         If denominator = 0 Then
             ComputeColK = ""
         Else
-            ComputeColK = CStr(numerator / denominator)
+            ComputeColK = numerator / denominator
         End If
 
     ElseIf LCase(C) = "swds" Or LCase(C) = "reprise suite valid" Then
@@ -552,7 +738,7 @@ Public Function ComputeColK(B As String, C As String, D As String, _
         If denominator = 0 Then
             ComputeColK = ""
         Else
-            ComputeColK = CStr(numerator / denominator)
+            ComputeColK = numerator / denominator
         End If
 
     Else
@@ -561,9 +747,8 @@ Public Function ComputeColK(B As String, C As String, D As String, _
 End Function
 
 ' ---------------------------------------------------------
-'  COLUMN O -- VLOOKUP on PowQ_Extract col A -> col I (index 9)
+'  COLUMN O -- VLOOKUP PowQ col A -> col I
 ' ---------------------------------------------------------
-' Key: B & "/" & E & "/UVR " & C & "/Sprint " & D
 
 Public Function ComputeColO(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As String
@@ -576,7 +761,11 @@ Public Function ComputeColO(B As String, C As String, D As String, _
 
     For r = 2 To UBound(powqArr, 1)
         If LCase(CStr(powqArr(r, COL_A) & "")) = lKey Then
-            ComputeColO = CStr(powqArr(r, COL_I) & "")
+            If IsValidPowQValue(powqArr(r, COL_I)) Then
+                ComputeColO = CStr(powqArr(r, COL_I) & "")
+            Else
+                ComputeColO = ""
+            End If
             Exit Function
         End If
     Next r
@@ -585,10 +774,8 @@ Public Function ComputeColO(B As String, C As String, D As String, _
 End Function
 
 ' ---------------------------------------------------------
-'  COLUMN T -- VLOOKUP on PowQ_Extract col A -> col I (index 9)
+'  COLUMN T -- VLOOKUP PowQ col A -> col I (with " OK")
 ' ---------------------------------------------------------
-' Key: B & "/" & E & "/UVR " & C & " OK/Sprint " & D
-' (same as col O but with " OK" suffix before "/Sprint ")
 
 Public Function ComputeColT(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As String
@@ -601,10 +788,91 @@ Public Function ComputeColT(B As String, C As String, D As String, _
 
     For r = 2 To UBound(powqArr, 1)
         If LCase(CStr(powqArr(r, COL_A) & "")) = lKey Then
-            ComputeColT = CStr(powqArr(r, COL_I) & "")
+            If IsValidPowQValue(powqArr(r, COL_I)) Then
+                ComputeColT = CStr(powqArr(r, COL_I) & "")
+            Else
+                ComputeColT = ""
+            End If
             Exit Function
         End If
     Next r
 
     ComputeColT = ""
+End Function
+
+' ---------------------------------------------------------
+'  ARCHIVE SUIVI_LIVRABLES
+' ---------------------------------------------------------
+
+Public Sub ArchiveSuiviLivrable()
+    Dim wsLiv As Worksheet
+    Dim wbNew As Workbook
+    Dim dlg As Object
+    Dim folderPath As String
+    Dim fileName As String
+    Dim fullPath As String
+    Dim ts As String
+
+    On Error GoTo ErrHandler
+
+    If Not SheetExists(SH_LIV) Then
+        MsgBox "Sheet """ & SH_LIV & """ not found.", vbExclamation
+        Exit Sub
+    End If
+
+    Set dlg = Application.FileDialog(4)  ' msoFileDialogFolderPicker
+    dlg.Title = "Select archive destination folder"
+    If dlg.Show <> -1 Then
+        MsgBox "Archive cancelled.", vbInformation
+        Exit Sub
+    End If
+    folderPath = dlg.SelectedItems(1)
+    If Right(folderPath, 1) <> "\" Then folderPath = folderPath & "\"
+
+    ts = Format(Now, "DDMMYYYY_HHMMSS")
+    fileName = "Suivi_Livrable_" & ts & ".xlsx"
+    fullPath = folderPath & fileName
+
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
+    Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
+    wsLiv.Copy
+    Set wbNew = ActiveWorkbook
+
+    Dim shp As Shape
+    For Each shp In wbNew.Sheets(1).Shapes
+        shp.Delete
+    Next shp
+
+    wbNew.SaveAs fileName:=fullPath, _
+                  FileFormat:=xlOpenXMLWorkbook, _
+                  CreateBackup:=False
+    wbNew.Close SaveChanges:=False
+
+    Dim lastRow As Long
+    lastRow = wsLiv.Cells(wsLiv.Rows.Count, COL_B).End(xlUp).Row
+    If lastRow >= LIV_FIRST_ROW Then
+        wsLiv.Rows(LIV_FIRST_ROW & ":" & lastRow).Delete Shift:=xlUp
+    End If
+
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+
+    MsgBox "Archive saved & sheet reset:" & vbCrLf & fullPath, vbInformation
+
+    Exit Sub
+
+ErrHandler:
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    MsgBox "Archive failed: " & Err.Description, vbCritical
+End Sub
+
+Private Function SheetExists(shName As String) As Boolean
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(shName)
+    On Error GoTo 0
+    SheetExists = Not ws Is Nothing
 End Function
