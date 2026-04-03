@@ -6,8 +6,10 @@ Public Sub UpdateSuiviLivrable()
     Dim lockCreated As Boolean
     Dim crArr As Variant
     Dim powqArr As Variant
+    Dim uvrArr As Variant
     Dim livArr As Variant
     Dim finRefCol As Long
+    Dim uvrColMap As Object
     Dim isFirstRun As Boolean
     Dim oldJson As String
     Dim jsonSnapshot As String
@@ -60,6 +62,9 @@ Public Sub UpdateSuiviLivrable()
     Dim i As Long
     Dim adl1Start As Long
     Dim swdsStart As Long
+    Dim yellowRanges As Collection
+    Dim yr As Variant
+    Dim colI2 As Long
     Dim msg As String
 
     On Error GoTo ErrHandler
@@ -97,6 +102,7 @@ Public Sub UpdateSuiviLivrable()
     ' ---------------------------------------------------------
     crArr = LoadSheetData(ThisWorkbook.Sheets(SH_CR))
     powqArr = LoadSheetData(ThisWorkbook.Sheets(SH_EXTRACT))
+    uvrArr = LoadSheetData(ThisWorkbook.Sheets(SH_UVR))
     finRefCol = FindFinRefColumn(powqArr)
 
     ' ---------------------------------------------------------
@@ -206,6 +212,8 @@ NextCrRow:
     ' ---------------------------------------------------------
     insertedCount = 0
     totalInsertedRows = 0
+    Set yellowRanges = New Collection
+    Set uvrColMap = BuildUVRColumnMap(wsLiv, uvrArr)
 
     If strsToInsert.Count > 0 Then
         Application.StatusBar = "Suivi Update: Inserting " & strsToInsert.Count & " STR block(s)..."
@@ -260,6 +268,7 @@ NextCrRow:
                                 If segIdx <= ycol.Count Then
                                     yp = ycol(segIdx)
                                     ApplyYellowSectionUtoX wsLiv, insertRow, insertRow + nrows - 1, wsTmp, yp(0), yp(1)
+                                    yellowRanges.Add Array(insertRow, insertRow + nrows - 1)
                                 End If
                             End If
 
@@ -320,6 +329,10 @@ NextCrRow:
                 Next rr
             End If
         Next strKey
+
+        For Each yr In yellowRanges
+            WriteYellowValuesUtoX wsLiv, yr(0), yr(1), uvrArr, uvrColMap, livArr
+        Next yr
     End If
 
     ' ---------------------------------------------------------
@@ -359,6 +372,14 @@ NextCrRow:
 
                 wsLiv.Cells(rr, COL_O).Value = ComputeColO(bv, cv, dv, ev, powqArr)
                 wsLiv.Cells(rr, COL_T).Value = ComputeColT(bv, cv, dv, ev, powqArr)
+
+                If wsLiv.Cells(rr, COL_U).Interior.ColorIndex <> xlNone Then
+                    For colI2 = COL_U To COL_X
+                        If uvrColMap.Exists(colI2) Then
+                            wsLiv.Cells(rr, colI2).Value = ComputeUVRCell(bv, cv, ev, uvrArr, CLng(uvrColMap(colI2)))
+                        End If
+                    Next colI2
+                End If
             Next matchItem
             updatedCount = updatedCount + 1
         Next strKey

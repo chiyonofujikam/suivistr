@@ -9,6 +9,7 @@ Option Explicit
 ' ---------------------------------------------------------
 
 Private m_SharedFolder As String
+Private m_ArchiveRunning As Boolean
 
 Public Function SHARED_FOLDER_PATH() As String
     Dim dlg As Object
@@ -464,6 +465,84 @@ Public Sub ApplyYellowSectionUtoX(wsLiv As Worksheet, ByVal destStart As Long, B
     Next i
 End Sub
 
+' Builds a mapping from Suivi_Livrables header names (row 3, cols U-X)
+' to PowQ_Suivi_UVR column indices (row 1).
+' Returns a Dictionary: livColIndex -> uvrColIndex  (e.g. 21 -> 5)
+Public Function BuildUVRColumnMap(wsLiv As Worksheet, uvrArr As Variant) As Object
+    Dim dict As Object
+    Set dict = CreateObject("Scripting.Dictionary")
+    Dim colIdx As Long
+    Dim headerName As String
+    Dim uc As Long
+
+    For colIdx = COL_U To COL_X
+        headerName = LCase(Trim$(CStr(wsLiv.Cells(3, colIdx).Value & "")))
+        If headerName <> "" Then
+            For uc = 1 To UBound(uvrArr, 2)
+                If LCase(Trim$(CStr(uvrArr(1, uc) & ""))) = headerName Then
+                    dict(colIdx) = uc
+                    Exit For
+                End If
+            Next uc
+        End If
+    Next colIdx
+
+    Set BuildUVRColumnMap = dict
+End Function
+
+' Looks up a single UVR value. Key = B & " " & E & " " & C matched against col A.
+' Returns the value from uvrColIdx, or "" if not found / zero.
+Public Function ComputeUVRCell(B As String, C As String, E As String, _
+                               uvrArr As Variant, ByVal uvrColIdx As Long) As Variant
+    Dim lookupKey As String
+    Dim r As Long
+    Dim v As Variant
+
+    lookupKey = LCase(B & " " & E & " " & C)
+
+    For r = 2 To UBound(uvrArr, 1)
+        If LCase(CStr(uvrArr(r, 1) & "")) = lookupKey Then
+            v = uvrArr(r, uvrColIdx)
+            If IsValidPowQValue(v) Then
+                If IsNumeric(v) Then
+                    If CDbl(v) = 0 Then
+                        ComputeUVRCell = ""
+                    Else
+                        ComputeUVRCell = v
+                    End If
+                Else
+                    ComputeUVRCell = v
+                End If
+            Else
+                ComputeUVRCell = ""
+            End If
+            Exit Function
+        End If
+    Next r
+
+    ComputeUVRCell = ""
+End Function
+
+' Writes cols U-X values for a range of rows using the UVR data.
+Public Sub WriteYellowValuesUtoX(wsLiv As Worksheet, ByVal destStart As Long, ByVal destEnd As Long, _
+                                 uvrArr As Variant, uvrColMap As Object, livArr As Variant)
+    Dim rr As Long
+    Dim colIdx As Long
+    Dim bv As String, cv As String, ev As String
+
+    For rr = destStart To destEnd
+        bv = CStr(livArr(rr, COL_B) & "")
+        cv = CStr(livArr(rr, COL_C) & "")
+        ev = CStr(livArr(rr, COL_E) & "")
+
+        For colIdx = COL_U To COL_X
+            If uvrColMap.Exists(colIdx) Then
+                wsLiv.Cells(rr, colIdx).Value = ComputeUVRCell(bv, cv, ev, uvrArr, CLng(uvrColMap(colIdx)))
+            End If
+        Next colIdx
+    Next rr
+End Sub
+
 ' Thin gray outline for ADL1 / SwDS sub-blocks.
 Public Sub ApplyLightOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal bottomRow As Long, _
                                   ByVal lastCol As Long)
@@ -813,6 +892,9 @@ Public Sub ArchiveSuiviLivrable()
     Dim fullPath As String
     Dim ts As String
 
+    If m_ArchiveRunning Then Exit Sub
+    m_ArchiveRunning = True
+
     On Error GoTo ErrHandler
 
     If Not SheetExists(SH_LIV) Then
@@ -835,6 +917,7 @@ Public Sub ArchiveSuiviLivrable()
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
+    Application.EnableEvents = False
 
     Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
     wsLiv.Copy
@@ -856,16 +939,20 @@ Public Sub ArchiveSuiviLivrable()
         wsLiv.Rows(LIV_FIRST_ROW & ":" & lastRow).Delete Shift:=xlUp
     End If
 
+    Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
+    m_ArchiveRunning = False
 
     MsgBox "Archive saved & sheet reset:" & vbCrLf & fullPath, vbInformation
 
     Exit Sub
 
 ErrHandler:
+    Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
+    m_ArchiveRunning = False
     MsgBox "Archive failed: " & Err.Description, vbCritical
 End Sub
 
