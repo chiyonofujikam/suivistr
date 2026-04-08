@@ -1,15 +1,19 @@
 Option Explicit
 
-' DEPENDENCY: JsonConverter.bas (https://github.com/VBA-tools/VBA-JSON)
-' Also requires: Tools > References > Microsoft Scripting Runtime (Dictionary)
-' Constants are in Globals.bas
-
-' ---------------------------------------------------------
-'  CONFIGURATION
-' ---------------------------------------------------------
+' Module: SuiviUtils
+' Purpose: Shared helpers used by UpdateSuiviLivrable.
+' Inputs:
+' - Workbook sheets named by constants in Globals.bas (e.g. SH_CR, SH_LIV, SH_EXTRACT, SH_UVR, SH_VHST, SH_TMP)
+' - Arrays loaded via LoadSheetData (1-based 2D Variant arrays)
 
 Private m_SharedFolder As String
 Private m_ArchiveRunning As Boolean
+
+#If VBA7 Then
+    Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As LongPtr)
+#Else
+    Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
+#End If
 
 Public Function SHARED_FOLDER_PATH() As String
     Dim dlg As Object
@@ -22,7 +26,7 @@ Public Function SHARED_FOLDER_PATH() As String
 
     Set dlg = Application.FileDialog(4)
     With dlg
-        .Title = "Select the shared folder for Suivi files (LOCK.txt, status.json)"
+        .Title = "Select the shared folder for Suivi files (config\LOCK.txt, config\status.json)"
         .ButtonName = "Select"
         If .Show = -1 Then
             p = .SelectedItems(1)
@@ -87,6 +91,70 @@ Public Function FileExists(path As String) As Boolean
     FileExists = (Dir(path) <> "")
 End Function
 
+' Shows a waiting window while Suivi_CR!I1 indicates update is running.
+' wsCR: Suivi_CR worksheet; lockCell: the lock cell (e.g. "I1").
+Public Sub WaitWhileLocked(wsCR As Worksheet, ByVal lockCell As String)
+    Dim frm As Object
+    Dim lbl As Object
+    Dim started As Date
+    Dim lockInfo As String
+    Dim lockUser As String
+    Dim lockStartedAt As String
+
+    started = Now
+
+    Set frm = CreateObject("Forms.UserForm.1")
+    frm.Caption = "Suivi Update"
+    frm.Width = 520
+    frm.Height = 170
+
+    Set lbl = frm.Controls.Add("Forms.Label.1", "lblInfo", True)
+    lbl.Left = 12
+    lbl.Top = 12
+    lbl.Width = frm.Width - 30
+    lbl.Height = frm.Height - 40
+    lbl.WordWrap = True
+
+    frm.Show vbModeless
+
+    Do While Trim$(CStr(wsCR.Range(lockCell).Value & "")) <> ""
+        lockInfo = CStr(wsCR.Range(lockCell).Value & "")
+        ParseLockInfo lockInfo, lockUser, lockStartedAt
+
+        lbl.Caption = "Update is currently running." & vbCrLf & vbCrLf & _
+                      "User: " & lockUser & vbCrLf & _
+                      "Started at: " & lockStartedAt & vbCrLf & vbCrLf & _
+                      "Waiting for release... (" & Format$(Now - started, "hh:nn:ss") & ")"
+        DoEvents
+        Sleep 1000
+    Loop
+
+    Unload frm
+End Sub
+
+Private Sub ParseLockInfo(lockInfo As String, ByRef lockUser As String, ByRef lockStartedAt As String)
+    Dim s As String
+    Dim pBy As Long
+    Dim pAt As Long
+
+    lockUser = "Unknown"
+    lockStartedAt = "Unknown"
+
+    s = Trim$(Replace(lockInfo, vbCr, ""))
+    If s = "" Then Exit Sub
+
+    pBy = InStr(1, s, "LOCKED by:", vbTextCompare)
+    If pBy = 0 Then Exit Sub
+
+    pAt = InStr(pBy + Len("LOCKED by:"), s, " at ", vbTextCompare)
+    If pAt > 0 Then
+        lockUser = Trim$(Mid$(s, pBy + Len("LOCKED by:"), pAt - (pBy + Len("LOCKED by:"))))
+        lockStartedAt = Trim$(Mid$(s, pAt + Len(" at ")))
+    Else
+        lockUser = Trim$(Mid$(s, pBy + Len("LOCKED by:")))
+    End If
+End Sub
+
 Public Function ReadTextFile(path As String) As String
     Dim fNum As Integer
     fNum = FreeFile
@@ -138,14 +206,6 @@ Public Function NormalizeValue(v As Variant) As String
     End If
 End Function
 
-Private Function CDblSafe(v As Variant) As Double
-    If IsNumeric(v) Then
-        CDblSafe = CDbl(v)
-    Else
-        CDblSafe = 0
-    End If
-End Function
-
 Private Function IsValidPowQValue(v As Variant) As Boolean
     If IsEmpty(v) Or IsNull(v) Or IsError(v) Then
         IsValidPowQValue = False
@@ -153,6 +213,14 @@ Private Function IsValidPowQValue(v As Variant) As Boolean
         IsValidPowQValue = False
     Else
         IsValidPowQValue = True
+    End If
+End Function
+
+Private Function CDblSafe(v As Variant) As Double
+    If IsNumeric(v) Then
+        CDblSafe = CDbl(v)
+    Else
+        CDblSafe = 0
     End If
 End Function
 
@@ -202,6 +270,8 @@ Public Function SerializeSnapshotToJson(crArr As Variant) As String
     Dim strVal As String
     Dim rowDict As Object
     Dim cellsDict As Object
+    Dim colLetter As String
+    Dim v As Variant
 
     Set coll = New Collection
     numCols = UBound(crArr, 2)
@@ -216,7 +286,22 @@ Public Function SerializeSnapshotToJson(crArr As Variant) As String
 
         Set cellsDict = CreateObject("Scripting.Dictionary")
         For c = 1 To numCols
-            cellsDict(ColNumToLetter(c)) = NormalizeValue(crArr(r, c))
+            colLetter = ColNumToLetter(c)
+            v = crArr(r, c)
+            If (colLetter = "J" Or colLetter = "L" Or colLetter = "N") Then
+                ' These columns are percentages in Suivi_CR; treat 0 as empty in snapshot.
+                If IsNumeric(v) Then
+                    If CDbl(v) = 0 Then
+                        cellsDict(colLetter) = ""
+                    Else
+                        cellsDict(colLetter) = NormalizeValue(v)
+                    End If
+                Else
+                    cellsDict(colLetter) = NormalizeValue(v)
+                End If
+            Else
+                cellsDict(colLetter) = NormalizeValue(v)
+            End If
         Next c
         Set rowDict("cells") = cellsDict
 
@@ -401,6 +486,200 @@ Public Function GetSprintsForSTR(crArr As Variant, strVal As String) As Collecti
     Next i
     Set GetSprintsForSTR = result
 End Function
+
+' Builds a lookup map from PowQ_EDU_CE_VHST:
+'   Col 1 = Nom_STR, Col 2 = Max_Sprint
+' Returns Dictionary: LCase(Nom_STR) -> normalized sprint key (e.g. "3")
+Public Function BuildMaxSprintMapVHST(vhstArr As Variant) As Object
+    Dim dict As Object
+    Dim r As Long
+    Dim k As String
+    Dim sp As String
+
+    Set dict = CreateObject("Scripting.Dictionary")
+
+    If IsEmpty(vhstArr) Then
+        Set BuildMaxSprintMapVHST = dict
+        Exit Function
+    End If
+    If UBound(vhstArr, 1) < 2 Then
+        Set BuildMaxSprintMapVHST = dict
+        Exit Function
+    End If
+
+    For r = 2 To UBound(vhstArr, 1)
+        k = LCase(Trim$(CStr(vhstArr(r, 1) & "")))
+        If k <> "" Then
+            sp = NormalizeSprintKey(vhstArr(r, 2))
+            If sp <> "" Then dict(k) = sp
+        End If
+    Next r
+
+    Set BuildMaxSprintMapVHST = dict
+End Function
+
+Private Function CollectionContains(col As Collection, ByVal value As String) As Boolean
+    Dim v As Variant
+    For Each v In col
+        If CStr(v) = value Then
+            CollectionContains = True
+            Exit Function
+        End If
+    Next v
+    CollectionContains = False
+End Function
+
+' Determines which sprint should receive the yellow section for a STR.
+' Primary source is PowQ_EDU_CE_VHST max sprint; fallback is the last sprint
+' present in Suivi_CR for that STR (and present in the template sprintMap).
+Public Function GetYellowSprintKeyForSTR(strKey As String, maxSprintMap As Object, _
+                                        strSprints As Collection, sprintMap As Object) As String
+    Dim candidate As String
+    Dim k As String
+    Dim i As Long
+
+    GetYellowSprintKeyForSTR = ""
+    k = LCase(Trim$(CStr(strKey & "")))
+
+    If Not maxSprintMap Is Nothing Then
+        If maxSprintMap.Exists(k) Then
+            candidate = CStr(maxSprintMap(k))
+            If candidate <> "" Then
+                If CollectionContains(strSprints, candidate) And sprintMap.Exists(candidate) Then
+                    GetYellowSprintKeyForSTR = candidate
+                    Exit Function
+                End If
+            End If
+        End If
+    End If
+
+    For i = strSprints.Count To 1 Step -1
+        candidate = CStr(strSprints(i))
+        If sprintMap.Exists(candidate) Then
+            GetYellowSprintKeyForSTR = candidate
+            Exit Function
+        End If
+    Next i
+End Function
+
+' Computes actual maximum sprint per STR based on Suivi_CR.
+' Returns Dictionary: LCase(STR) -> max sprint as string (e.g. "3")
+Public Function BuildActualMaxSprintMapCR(crArr As Variant) As Object
+    Dim dict As Object
+    Dim r As Long
+    Dim k As String
+    Dim sp As String
+    Dim n As Double
+    Dim cur As Double
+
+    Set dict = CreateObject("Scripting.Dictionary")
+
+    For r = CR_FIRST_ROW To UBound(crArr, 1)
+        k = LCase(Trim$(CStr(crArr(r, COL_B) & "")))
+        If k <> "" Then
+            sp = NormalizeSprintKey(crArr(r, COL_C))
+            If IsNumeric(sp) Then
+                n = CDbl(sp)
+                If dict.Exists(k) Then
+                    cur = CDbl(dict(k))
+                    If n > cur Then dict(k) = CStr(CLng(n))
+                Else
+                    dict(k) = CStr(CLng(n))
+                End If
+            End If
+        End If
+    Next r
+
+    Set BuildActualMaxSprintMapCR = dict
+End Function
+
+' Checks CR max sprint > VHST max sprint. If user agrees, updates the VHST sheet (col 2),
+' and adds missing STRs at the bottom. Returns True if execution should continue.
+Public Function CheckAndOfferUpdateVHSTMaxSprints(wsVHST As Worksheet, crArr As Variant, vhstArr As Variant) As Boolean
+    Dim actualMap As Object
+    Dim vhstMap As Object
+    Dim updates As Object
+    Dim k As Variant
+    Dim a As Double, v As Double
+    Dim msg As String
+    Dim shown As Long
+    Dim resp As VbMsgBoxResult
+
+    Set actualMap = BuildActualMaxSprintMapCR(crArr)
+    Set vhstMap = BuildMaxSprintMapVHST(vhstArr)
+    Set updates = CreateObject("Scripting.Dictionary")
+
+    msg = "Some STR(s) have a sprint in Suivi_CR higher than the Max_Sprint in " & SH_VHST & ":" & vbCrLf & vbCrLf
+    shown = 0
+
+    For Each k In actualMap.Keys
+        a = CDbl(actualMap(k))
+        If vhstMap.Exists(k) Then
+            If IsNumeric(vhstMap(k)) Then
+                v = CDbl(vhstMap(k))
+            Else
+                v = 0
+            End If
+        Else
+            v = 0
+        End If
+
+        If a > v Then
+            updates(k) = CStr(CLng(a))
+            If shown < 20 Then
+                msg = msg & "- " & CStr(k) & " : VHST=" & CStr(CLng(v)) & " / CR=" & CStr(CLng(a)) & vbCrLf
+                shown = shown + 1
+            End If
+        End If
+    Next k
+
+    If updates.Count = 0 Then
+        CheckAndOfferUpdateVHSTMaxSprints = True
+        Exit Function
+    End If
+
+    If updates.Count > shown Then
+        msg = msg & vbCrLf & "(+" & (updates.Count - shown) & " more)"
+    End If
+    msg = msg & vbCrLf & vbCrLf & "Do you want to update " & SH_VHST & " Max_Sprint values now?"
+
+    resp = MsgBox(msg, vbYesNo + vbExclamation, "Max Sprint mismatch")
+    If resp = vbYes Then
+        ApplyVHSTMaxSprintUpdates wsVHST, updates
+    End If
+
+    CheckAndOfferUpdateVHSTMaxSprints = True
+End Function
+
+Private Sub ApplyVHSTMaxSprintUpdates(wsVHST As Worksheet, updates As Object)
+    Dim lastRow As Long
+    Dim r As Long
+    Dim k As String
+    Dim found As Boolean
+    Dim u As Variant
+
+    lastRow = wsVHST.Cells(wsVHST.Rows.Count, 1).End(xlUp).Row
+    If lastRow < 2 Then lastRow = 1
+
+    For Each u In updates.Keys
+        k = CStr(u)
+        found = False
+
+        For r = 2 To lastRow
+            If LCase(Trim$(CStr(wsVHST.Cells(r, 1).Value & ""))) = k Then
+                wsVHST.Cells(r, 2).Value = updates(u)
+                found = True
+                Exit For
+            End If
+        Next r
+
+        If Not found Then
+            lastRow = lastRow + 1
+            wsVHST.Cells(lastRow, 1).Value = u
+            wsVHST.Cells(lastRow, 2).Value = updates(u)
+        End If
+    Next u
+End Sub
 
 Private Function SprintSortKey(s As String) As Double
     If IsNumeric(s) Then
@@ -598,6 +877,92 @@ Public Sub ApplyHardOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal b
         .Color = RGB(0, 0, 0)
     End With
 End Sub
+
+' Clears all borders in Suivi_Livrables (from LIV_FIRST_ROW) then rebuilds
+' light borders for ADL1 / SwDS and hard borders per STR block.
+Public Sub RebuildSuiviLivrablesBorders(wsLiv As Worksheet, wsTmp As Worksheet, sprintMap As Object, ByVal lastCol As Long)
+    Dim lastRow As Long
+    Dim r As Long
+    Dim blockStart As Long
+    Dim blockEnd As Long
+    Dim curStr As String
+    Dim nextStr As String
+    Dim swdsMarker As String
+    Dim swdsStartRow As Long
+    Dim k As Variant
+    Dim rangesCol As Collection
+    Dim pair As Variant
+
+    lastRow = wsLiv.Cells(wsLiv.Rows.Count, COL_B).End(xlUp).Row
+    If lastRow < LIV_FIRST_ROW Then Exit Sub
+
+    ' Determine SwDS marker from template: col C of first SwDS row for any sprint.
+    swdsMarker = ""
+    If Not sprintMap Is Nothing Then
+        For Each k In sprintMap.Keys
+            Set rangesCol = sprintMap(CStr(k))
+            If rangesCol.Count >= 2 Then
+                pair = rangesCol(2)
+                swdsMarker = CStr(wsTmp.Cells(CLng(pair(0)), COL_C).Value & "")
+                Exit For
+            End If
+        Next k
+    End If
+
+    ' Clear all existing borders.
+    With wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, 1), wsLiv.Cells(lastRow, lastCol)).Borders
+        .LineStyle = xlNone
+    End With
+
+    blockStart = LIV_FIRST_ROW
+    Do While blockStart <= lastRow
+        curStr = Trim$(CStr(wsLiv.Cells(blockStart, COL_B).Value & ""))
+        If curStr = "" Then
+            blockStart = blockStart + 1
+            GoTo NextBlock
+        End If
+
+        blockEnd = blockStart
+        Do While blockEnd < lastRow
+            nextStr = Trim$(CStr(wsLiv.Cells(blockEnd + 1, COL_B).Value & ""))
+            If nextStr <> curStr Then Exit Do
+            blockEnd = blockEnd + 1
+        Loop
+
+        ' Find SwDS start row within this STR block.
+        swdsStartRow = blockEnd + 1
+        If swdsMarker <> "" Then
+            For r = blockStart To blockEnd
+                If CStr(wsLiv.Cells(r, COL_C).Value & "") = swdsMarker Then
+                    swdsStartRow = r
+                    Exit For
+                End If
+            Next r
+        End If
+
+        If swdsStartRow > blockStart Then
+            ApplyLightOutlineBorder wsLiv, blockStart, swdsStartRow - 1, lastCol
+        End If
+        If swdsStartRow <= blockEnd Then
+            ApplyLightOutlineBorder wsLiv, swdsStartRow, blockEnd, lastCol
+        End If
+        ApplyHardOutlineBorder wsLiv, blockStart, blockEnd, lastCol
+
+        blockStart = blockEnd + 1
+NextBlock:
+    Loop
+End Sub
+
+' Compute column A for Suivi_Livrables.
+' Inputs: B,C,D,E are the row values from columns B,C,D,E.
+' Output: if B is empty => "" else B & E & D & C
+Public Function ComputeColA(B As String, C As String, D As String, E As String) As String
+    If Trim$(B) = "" Then
+        ComputeColA = ""
+    Else
+        ComputeColA = B & E & D & C
+    End If
+End Function
 
 ' ---------------------------------------------------------
 '  COLUMN F -- COUNTIFS(Suivi_CR: B=$B, C=$D, D=$E, J<>"")
@@ -886,11 +1251,12 @@ End Function
 Public Sub ArchiveSuiviLivrable()
     Dim wsLiv As Worksheet
     Dim wbNew As Workbook
-    Dim dlg As Object
     Dim folderPath As String
     Dim fileName As String
     Dim fullPath As String
     Dim ts As String
+    Dim dayFolder As String
+    Dim resp As VbMsgBoxResult
 
     If m_ArchiveRunning Then Exit Sub
     m_ArchiveRunning = True
@@ -902,18 +1268,15 @@ Public Sub ArchiveSuiviLivrable()
         Exit Sub
     End If
 
-    Set dlg = Application.FileDialog(4)  ' msoFileDialogFolderPicker
-    dlg.Title = "Select archive destination folder"
-    If dlg.Show <> -1 Then
-        MsgBox "Archive cancelled.", vbInformation
-        Exit Sub
-    End If
-    folderPath = dlg.SelectedItems(1)
-    If Right(folderPath, 1) <> "\" Then folderPath = folderPath & "\"
+    folderPath = SHARED_FOLDER_PATH & "Archived\"
+    If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
+
+    dayFolder = folderPath & Format$(Date, "DDMMYYYY") & "\"
+    If Dir$(dayFolder, vbDirectory) = "" Then MkDir dayFolder
 
     ts = Format(Now, "DDMMYYYY_HHMMSS")
     fileName = "Suivi_Livrable_" & ts & ".xlsx"
-    fullPath = folderPath & fileName
+    fullPath = dayFolder & fileName
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
@@ -944,7 +1307,12 @@ Public Sub ArchiveSuiviLivrable()
     Application.ScreenUpdating = True
     m_ArchiveRunning = False
 
-    MsgBox "Archive saved & sheet reset:" & vbCrLf & fullPath, vbInformation
+    resp = MsgBox("Archive saved & sheet reset." & vbCrLf & vbCrLf & _
+                  "Open the archived file now?" & vbCrLf & fullPath, _
+                  vbYesNo + vbInformation, "Archive")
+    If resp = vbYes Then
+        ThisWorkbook.FollowHyperlink fullPath
+    End If
 
     Exit Sub
 

@@ -8,6 +8,7 @@ Public Const SH_CR         As String = "Suivi_CR"
 Public Const SH_LIV        As String = "Suivi_Livrables"
 Public Const SH_EXTRACT    As String = "PowQ_Extract"
 Public Const SH_UVR        As String = "PowQ_Suivi_UVR"
+Public Const SH_VHST       As String = "PowQ_EDU_CE_VHST"
 Public Const SH_TMP        As String = "Suivi_Livrables_Tmp"
 
 ' ---------------------------------------------------------
@@ -16,7 +17,6 @@ Public Const SH_TMP        As String = "Suivi_Livrables_Tmp"
 
 Public Const CR_FIRST_ROW  As Long = 3
 Public Const LIV_FIRST_ROW As Long = 4
-Public Const CR_MAX_ROW    As Long = 9976
 
 ' Template block in Suivi_Livrables_Tmp (rows TMP_FIRST_ROW:TMP_LAST_ROW).
 ' Sprints detected from col D; only sprints present in Suivi_CR are copied.
