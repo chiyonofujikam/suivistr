@@ -1,11 +1,5 @@
 Option Explicit
 
-' Module: SuiviUtils
-' Purpose: Shared helpers used by UpdateSuiviLivrable.
-' Inputs:
-' - Workbook sheets named by constants in Globals.bas (e.g. SH_CR, SH_LIV, SH_EXTRACT, SH_UVR, SH_VHST, SH_TMP)
-' - Arrays loaded via LoadSheetData (1-based 2D Variant arrays)
-
 Private m_SharedFolder As String
 Private m_ArchiveRunning As Boolean
 
@@ -40,10 +34,6 @@ Public Function SHARED_FOLDER_PATH() As String
 
     SHARED_FOLDER_PATH = m_SharedFolder
 End Function
-
-' ---------------------------------------------------------
-'  SHEET VALIDATION
-' ---------------------------------------------------------
 
 Public Sub ValidateRequiredSheets()
     Dim names As Variant
@@ -83,16 +73,10 @@ Public Sub ValidateRequiredSheets()
     End If
 End Sub
 
-' ---------------------------------------------------------
-'  LOW-LEVEL UTILITIES
-' ---------------------------------------------------------
-
 Public Function FileExists(path As String) As Boolean
     FileExists = (Dir(path) <> "")
 End Function
 
-' Shows a waiting window while Suivi_CR!I1 indicates update is running.
-' wsCR: Suivi_CR worksheet; lockCell: the lock cell (e.g. "I1").
 Public Sub WaitWhileLocked(wsCR As Worksheet, ByVal lockCell As String)
     Dim started As Date
     Dim lockInfo As String
@@ -217,10 +201,6 @@ Private Function CDblSafe(v As Variant) As Double
     End If
 End Function
 
-' ---------------------------------------------------------
-'  SHEET DATA LOADER
-' ---------------------------------------------------------
-
 Public Function LoadSheetData(ws As Worksheet) As Variant
     Dim ur As Range
     Dim lastRow As Long
@@ -250,10 +230,6 @@ Public Function LoadSheetData(ws As Worksheet) As Variant
         LoadSheetData = rng.Value
     End If
 End Function
-
-' ---------------------------------------------------------
-'  JSON SNAPSHOT -- SERIALIZE
-' ---------------------------------------------------------
 
 Public Function SnapshotRowKey(crArr As Variant, r As Long) As String
     SnapshotRowKey = CStr(crArr(r, COL_B) & "") & "|" & _
@@ -285,7 +261,6 @@ Public Function SerializeSnapshotToJson(crArr As Variant) As String
         rowDict("row") = r
 
         Set cellsDict = CreateObject("Scripting.Dictionary")
-        ' Snapshot only B:Q (2..17) to keep status.json small/stable.
         For c = COL_B To 17
             If c > numCols Then Exit For
             colLetter = ColNumToLetter(c)
@@ -312,10 +287,6 @@ NextSnapRow:
 
     SerializeSnapshotToJson = JsonConverter.ConvertToJson(coll, Whitespace:=2)
 End Function
-
-' ---------------------------------------------------------
-'  JSON SNAPSHOT -- PARSE
-' ---------------------------------------------------------
 
 Public Function ParseSnapshotFromJson(jsonStr As String) As Object
     Dim result As Object
@@ -347,10 +318,6 @@ Public Function ParseSnapshotFromJson(jsonStr As String) As Object
 
     Set ParseSnapshotFromJson = result
 End Function
-
-' ---------------------------------------------------------
-'  LOOKUP HELPERS
-' ---------------------------------------------------------
 
 Public Function FindFinRefColumn(powqArr As Variant) As Long
     Dim c As Long
@@ -396,11 +363,6 @@ Public Function FindAllRowsBySTR(livArr As Variant, strVal As String) As Collect
     Set FindAllRowsBySTR = result
 End Function
 
-' ---------------------------------------------------------
-'  SPRINT HELPERS
-' ---------------------------------------------------------
-
-' Extracts a numeric sprint key from any value: 1, "1", "Sprint 1" -> "1"
 Public Function NormalizeSprintKey(v As Variant) As String
     Dim s As String
     Dim i As Long
@@ -438,8 +400,6 @@ Public Function NormalizeSprintKey(v As Variant) As String
     NormalizeSprintKey = s
 End Function
 
-' Returns sorted unique sprint keys from Suivi_CR col C for a given STR (col B).
-' Falls back to {"1","2","3"} if no sprints found.
 Public Function GetSprintsForSTR(crArr As Variant, strVal As String) As Collection
     Dim seen As Object
     Dim result As New Collection
@@ -492,9 +452,6 @@ Public Function GetSprintsForSTR(crArr As Variant, strVal As String) As Collecti
     Set GetSprintsForSTR = result
 End Function
 
-' Builds a lookup map from PowQ_EDU_CE_VHST:
-'   Col 1 = Nom_STR, Col 2 = Max_Sprint
-' Returns Dictionary: LCase(Nom_STR) -> normalized sprint key (e.g. "3")
 Public Function BuildMaxSprintMapVHST(vhstArr As Variant) As Object
     Dim dict As Object
     Dim r As Long
@@ -534,9 +491,6 @@ Private Function CollectionContains(col As Collection, ByVal value As String) As
     CollectionContains = False
 End Function
 
-' Determines which sprint should receive the yellow section for a STR.
-' Primary source is PowQ_EDU_CE_VHST max sprint; fallback is the last sprint
-' present in Suivi_CR for that STR (and present in the template sprintMap).
 Public Function GetYellowSprintKeyForSTR(strKey As String, maxSprintMap As Object, _
                                         strSprints As Collection, sprintMap As Object) As String
     Dim candidate As String
@@ -567,8 +521,6 @@ Public Function GetYellowSprintKeyForSTR(strKey As String, maxSprintMap As Objec
     Next i
 End Function
 
-' Computes actual maximum sprint per STR based on Suivi_CR.
-' Returns Dictionary: LCase(STR) -> max sprint as string (e.g. "3")
 Public Function BuildActualMaxSprintMapCR(crArr As Variant) As Object
     Dim dict As Object
     Dim r As Long
@@ -598,8 +550,6 @@ Public Function BuildActualMaxSprintMapCR(crArr As Variant) As Object
     Set BuildActualMaxSprintMapCR = dict
 End Function
 
-' Checks CR max sprint > VHST max sprint. If user agrees, updates the VHST sheet (col 2),
-' and adds missing STRs at the bottom. Returns True if execution should continue.
 Public Function CheckAndOfferUpdateVHSTMaxSprints(wsVHST As Worksheet, crArr As Variant, vhstArr As Variant) As Boolean
     Dim actualMap As Object
     Dim vhstMap As Object
@@ -694,8 +644,6 @@ Private Function SprintSortKey(s As String) As Double
     End If
 End Function
 
-' Maps each sprint key to its template row ranges: key -> Collection of Array(startRow, endRow).
-' Segment 1 = ADL1, segment 2 = SwDS.
 Public Function BuildSprintRangeMap(ws As Worksheet) As Object
     Dim map As Object
     Dim r As Long
@@ -732,11 +680,6 @@ Private Sub SprintMapAddRange(map As Object, key As String, startR As Long, endR
     col.Add Array(startR, endR)
 End Sub
 
-' ---------------------------------------------------------
-'  FORMATTING HELPERS
-' ---------------------------------------------------------
-
-' Copies yellow background for cols U-X from template rows to destination rows.
 Public Sub ApplyYellowSectionUtoX(wsLiv As Worksheet, ByVal destStart As Long, ByVal destEnd As Long, _
                                  wsTmp As Worksheet, ByVal srcStart As Long, ByVal srcEnd As Long)
     Dim i As Long
@@ -749,15 +692,13 @@ Public Sub ApplyYellowSectionUtoX(wsLiv As Worksheet, ByVal destStart As Long, B
     Next i
 End Sub
 
-' Builds a mapping from Suivi_Livrables header names (row 3, cols U-X)
-' to PowQ_Suivi_UVR column indices (row 1).
-' Returns a Dictionary: livColIndex -> uvrColIndex  (e.g. 21 -> 5)
 Public Function BuildUVRColumnMap(wsLiv As Worksheet, uvrArr As Variant) As Object
     Dim dict As Object
-    Set dict = CreateObject("Scripting.Dictionary")
     Dim colIdx As Long
     Dim headerName As String
     Dim uc As Long
+
+    Set dict = CreateObject("Scripting.Dictionary")
 
     For colIdx = COL_U To COL_X
         headerName = LCase(Trim$(CStr(wsLiv.Cells(3, colIdx).Value & "")))
@@ -774,8 +715,6 @@ Public Function BuildUVRColumnMap(wsLiv As Worksheet, uvrArr As Variant) As Obje
     Set BuildUVRColumnMap = dict
 End Function
 
-' Looks up a single UVR value. Key = B & " " & E & " " & C matched against col A.
-' Returns the value from uvrColIdx, or "" if not found / zero.
 Public Function ComputeUVRCell(B As String, C As String, E As String, _
                                uvrArr As Variant, ByVal uvrColIdx As Long) As Variant
     Dim lookupKey As String
@@ -805,7 +744,6 @@ Public Function ComputeUVRCell(B As String, C As String, E As String, _
     ComputeUVRCell = 0
 End Function
 
-' Writes cols U-X values for a range of rows using the UVR data.
 Public Sub WriteYellowValuesUtoX(wsLiv As Worksheet, ByVal destStart As Long, ByVal destEnd As Long, _
                                  uvrArr As Variant, uvrColMap As Object, livArr As Variant)
     Dim rr As Long
@@ -825,7 +763,6 @@ Public Sub WriteYellowValuesUtoX(wsLiv As Worksheet, ByVal destStart As Long, By
     Next rr
 End Sub
 
-' Thin gray outline for ADL1 / SwDS sub-blocks.
 Public Sub ApplyLightOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal bottomRow As Long, _
                                   ByVal lastCol As Long)
     Dim rng As Range
@@ -853,7 +790,6 @@ Public Sub ApplyLightOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal 
     End With
 End Sub
 
-' Thick black outline for a full STR block.
 Public Sub ApplyHardOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal bottomRow As Long, _
                                   ByVal lastCol As Long)
     Dim rng As Range
@@ -881,8 +817,6 @@ Public Sub ApplyHardOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal b
     End With
 End Sub
 
-' Clears all borders in Suivi_Livrables (from LIV_FIRST_ROW) then rebuilds
-' light borders for ADL1 / SwDS and hard borders per STR block.
 Public Sub RebuildSuiviLivrablesBorders(wsLiv As Worksheet, wsTmp As Worksheet, sprintMap As Object, ByVal lastCol As Long)
     Dim lastRow As Long
     Dim r As Long
@@ -899,7 +833,6 @@ Public Sub RebuildSuiviLivrablesBorders(wsLiv As Worksheet, wsTmp As Worksheet, 
     lastRow = wsLiv.Cells(wsLiv.Rows.Count, COL_B).End(xlUp).Row
     If lastRow < LIV_FIRST_ROW Then Exit Sub
 
-    ' Determine SwDS marker from template: col C of first SwDS row for any sprint.
     swdsMarker = ""
     If Not sprintMap Is Nothing Then
         For Each k In sprintMap.Keys
@@ -912,7 +845,6 @@ Public Sub RebuildSuiviLivrablesBorders(wsLiv As Worksheet, wsTmp As Worksheet, 
         Next k
     End If
 
-    ' Clear all existing borders.
     With wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, 1), wsLiv.Cells(lastRow, lastCol)).Borders
         .LineStyle = xlNone
     End With
@@ -932,7 +864,6 @@ Public Sub RebuildSuiviLivrablesBorders(wsLiv As Worksheet, wsTmp As Worksheet, 
             blockEnd = blockEnd + 1
         Loop
 
-        ' Find SwDS start row within this STR block.
         swdsStartRow = blockEnd + 1
         If swdsMarker <> "" Then
             For r = blockStart To blockEnd
@@ -956,9 +887,6 @@ NextBlock:
     Loop
 End Sub
 
-' Compute column A for Suivi_Livrables.
-' Inputs: B,C,D,E are the row values from columns B,C,D,E.
-' Output: if B is empty => "" else B & E & D & C
 Public Function ComputeColA(B As String, C As String, D As String, E As String) As String
     If Trim$(B) = "" Then
         ComputeColA = ""
@@ -966,10 +894,6 @@ Public Function ComputeColA(B As String, C As String, D As String, E As String) 
         ComputeColA = B & E & D & C
     End If
 End Function
-
-' ---------------------------------------------------------
-'  COLUMN F -- COUNTIFS(Suivi_CR: B=$B, C=$D, D=$E, J<>"")
-' ---------------------------------------------------------
 
 Public Function ComputeColF(B As String, C As String, D As String, _
                             E As String, crArr As Variant) As Long
@@ -994,10 +918,6 @@ Public Function ComputeColF(B As String, C As String, D As String, _
 
     ComputeColF = cnt
 End Function
-
-' ---------------------------------------------------------
-'  COLUMN G -- COUNTIFS(same as F) + Suivi_CR!G = "Bloque"
-' ---------------------------------------------------------
 
 Public Function ComputeColG(B As String, C As String, D As String, _
                             E As String, crArr As Variant) As Long
@@ -1026,10 +946,6 @@ Public Function ComputeColG(B As String, C As String, D As String, _
     ComputeColG = cnt
 End Function
 
-' ---------------------------------------------------------
-'  COLUMN H -- SUMIFS(PowQ!Y, B=$B, C=$E, F=$C, U=$D)
-' ---------------------------------------------------------
-
 Public Function ComputeColH(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As Double
     Dim total As Double
@@ -1052,10 +968,6 @@ Public Function ComputeColH(B As String, C As String, D As String, _
 
     ComputeColH = total
 End Function
-
-' ---------------------------------------------------------
-'  COLUMN I -- VLOOKUP PowQ_Extract col A -> "Fin Ref"
-' ---------------------------------------------------------
 
 Public Function ComputeColI(B As String, C As String, D As String, _
                             E As String, powqArr As Variant, _
@@ -1086,7 +998,6 @@ Public Function ComputeColI(B As String, C As String, D As String, _
     ComputeColI = ""
 End Function
 
-' Column M -- IFERROR(VLOOKUP(B&"/"&E&"/Reprise suite valid/Sprint "&D; PowQ_Extract A:I; 9; 0), "")
 Public Function ComputeColM(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As Variant
     Dim lookupKey As String
@@ -1109,12 +1020,6 @@ Public Function ComputeColM(B As String, C As String, D As String, _
 
     ComputeColM = ""
 End Function
-
-' ---------------------------------------------------------
-'  COLUMN J -- MAX(PowQ_Extract I) where B=$B, C=$E, U=$D, F=$C
-'  ADL1:  I <> "" (numeric values only contribute to MAX; blank => "")
-'  SwDS:  I <> "" and I <> 0 (same matches; excludes zero)
-' ---------------------------------------------------------
 
 Public Function ComputeColJ(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As Variant
@@ -1166,10 +1071,6 @@ Public Function ComputeColJ(B As String, C As String, D As String, _
     End If
 End Function
 
-' ---------------------------------------------------------
-'  COLUMN K -- Average of Suivi_CR!J (ADL1) or L (SwDS) for matching B/D/E
-' ---------------------------------------------------------
-
 Public Function ComputeColK(B As String, C As String, D As String, _
                             E As String, crArr As Variant) As Double
     Dim total As Double
@@ -1216,10 +1117,6 @@ Public Function ComputeColK(B As String, C As String, D As String, _
     End If
 End Function
 
-' ---------------------------------------------------------
-'  COLUMN O -- VLOOKUP PowQ col A -> col I
-' ---------------------------------------------------------
-
 Public Function ComputeColO(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As Variant
     Dim lookupKey As String
@@ -1243,10 +1140,6 @@ Public Function ComputeColO(B As String, C As String, D As String, _
     ComputeColO = ""
 End Function
 
-' ---------------------------------------------------------
-'  COLUMN T -- VLOOKUP PowQ col A -> col I (with " OK")
-' ---------------------------------------------------------
-
 Public Function ComputeColT(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As Variant
     Dim lookupKey As String
@@ -1269,10 +1162,6 @@ Public Function ComputeColT(B As String, C As String, D As String, _
 
     ComputeColT = ""
 End Function
-
-' ---------------------------------------------------------
-'  ARCHIVE SUIVI_LIVRABLES
-' ---------------------------------------------------------
 
 Public Sub ArchiveSuiviLivrable()
     Dim wsLiv As Worksheet
@@ -1320,7 +1209,6 @@ Public Sub ArchiveSuiviLivrable()
 
     Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
 
-    ' Remove any active AutoFilter so the archive covers ALL rows.
     If wsLiv.AutoFilterMode Then wsLiv.AutoFilterMode = False
 
     Set wbNew = Workbooks.Add(xlWBATWorksheet)
