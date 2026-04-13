@@ -7,9 +7,11 @@ Option Explicit
 ' - Sheets referenced by constants in Globals.bas
 ' - Shared folder selected via SHARED_FOLDER_PATH() for LOCK.txt and status.json
 Public Sub UpdateSuiviLivrable()
-    Dim lockPath As String
     Dim statusPath As String
     Dim lockCreated As Boolean
+    Dim configDir As String
+    Dim wsCR As Worksheet
+    Dim lockValue As String
     Dim crArr As Variant
     Dim powqArr As Variant
     Dim uvrArr As Variant
@@ -39,7 +41,6 @@ Public Sub UpdateSuiviLivrable()
     Dim firstNewRow As Long
     Dim iterItem As Variant
     Dim bv As String, cv As String, dv As String, ev As String
-    Dim bvK As String, cvK As String, dvK As String, evK As String
     Dim rr As Long
     Dim blockEnd As Long
     Dim blockStartRow As Long
@@ -76,6 +77,9 @@ Public Sub UpdateSuiviLivrable()
     Dim desiredSprints As Collection
     Dim existingSprints As Object
     Dim missingSprints As Collection
+    Dim desiredSprintSet As Object
+    Dim extraSprints As Object
+    Dim delCount As Long
     Dim minRow As Long, maxRow As Long
     Dim swdsMarker As String
     Dim swdsStartRow As Long
@@ -85,21 +89,16 @@ Public Sub UpdateSuiviLivrable()
     Dim pair As Variant
     Dim lastBorderCol As Long
     Dim msg As String
+    Dim errNumber As Long
+    Dim errMessage As String
+    Dim errSource As String
 
     On Error GoTo ErrHandler
-
-    Dim configDir As String
-    configDir = SHARED_FOLDER_PATH & "config\"
-    If Dir$(configDir, vbDirectory) = "" Then MkDir configDir
-
-    statusPath = configDir & "status.json"
     lockCreated = False
-    Dim wsCR As Worksheet
-    Dim lockValue As String
     Set wsCR = ThisWorkbook.Sheets(SH_CR)
 
     ' ---------------------------------------------------------
-    '  LOCK CHECK
+    '  LOCK CHECK -- set immediately on click
     ' ---------------------------------------------------------
     If Trim$(CStr(wsCR.Range("I1").Value & "")) <> "" Then
         WaitWhileLocked wsCR, "I1"
@@ -107,6 +106,14 @@ Public Sub UpdateSuiviLivrable()
     lockValue = "LOCKED by: " & Environ$("USERNAME") & " at " & Format$(Now, "YYYY-MM-DD HH:NN:SS")
     wsCR.Range("I1").Value = lockValue
     lockCreated = True
+
+    wsCR.Range("I1").Locked = False
+    wsCR.Protect Password:="suivi_update", UserInterfaceOnly:=False
+
+    configDir = SHARED_FOLDER_PATH & "config\"
+    If Dir$(configDir, vbDirectory) = "" Then MkDir configDir
+
+    statusPath = configDir & "status.json"
 
     ' ---------------------------------------------------------
     '  VALIDATE SHEETS
@@ -145,35 +152,40 @@ Public Sub UpdateSuiviLivrable()
         Application.StatusBar = "Suivi Update: Creating initial snapshot..."
         jsonSnapshot = SerializeSnapshotToJson(crArr)
         WriteTextFile statusPath, jsonSnapshot
-        MsgBox "Initial snapshot created. The sheet is now tracked." & vbCrLf & _
-               "Run Update again to perform the first synchronization.", _
-               vbInformation, "Suivi Update"
-        GoTo Cleanup
+        ' Continue in the same run: treat everything as new (empty old snapshot).
     End If
 
     ' ---------------------------------------------------------
     '  COMPUTE DIFF (new STR values + modified rows)
     ' ---------------------------------------------------------
     Application.StatusBar = "Suivi Update: Computing changes..."
-    oldJson = ReadTextFile(statusPath)
-    Set oldSnapshot = ParseSnapshotFromJson(oldJson)
+    If isFirstRun Then
+        Set oldSnapshot = CreateObject("Scripting.Dictionary")
+    Else
+        oldJson = ReadTextFile(statusPath)
+        Set oldSnapshot = ParseSnapshotFromJson(oldJson)
+    End If
 
     Set newSTRs = New Collection
     Set modifiedRows = New Collection
 
+    Dim rowKey As String
     For r = CR_FIRST_ROW To UBound(crArr, 1)
         strVal = CStr(crArr(r, COL_B) & "")
         If strVal = "" Then GoTo NextCrRow
 
-        If Not oldSnapshot.Exists(strVal) Then
+        rowKey = SnapshotRowKey(crArr, r)
+
+        If Not oldSnapshot.Exists(rowKey) Then
             Set entry = CreateObject("Scripting.Dictionary")
             entry("STR") = strVal
             entry("row") = r
             newSTRs.Add entry
         Else
-            Set oldCells = oldSnapshot(strVal)
+            Set oldCells = oldSnapshot(rowKey)
             changed = False
-            For c = 1 To UBound(crArr, 2)
+            For c = COL_B To 17
+                If c > UBound(crArr, 2) Then Exit For
                 colLetter = ColNumToLetter(c)
                 currentVal = NormalizeValue(crArr(r, c))
                 If oldCells.Exists(colLetter) Then
@@ -285,7 +297,7 @@ NextCrRow:
                             Application.CutCopyMode = False
 
                             For rr = insertRow To insertRow + nrows - 1
-                                wsLiv.Cells(rr, COL_B).Value = CStr(strKey)
+                                wsLiv.Cells(rr, COL_B).value = CStr(strKey)
                             Next rr
 
                             If maxSprintKey <> "" And CStr(sp) = maxSprintKey And sprintMap.Exists("3") Then
@@ -333,26 +345,18 @@ NextCrRow:
                     dv = CStr(livArr(rr, COL_D) & "")
                     ev = CStr(livArr(rr, COL_E) & "")
 
-                    wsLiv.Cells(rr, COL_F).Value = ComputeColF(bv, cv, dv, ev, crArr)
-                    wsLiv.Cells(rr, COL_G).Value = ComputeColG(bv, cv, dv, ev, crArr)
-                    wsLiv.Cells(rr, COL_H).Value = ComputeColH(bv, cv, dv, ev, powqArr)
-                    wsLiv.Cells(rr, COL_I).Value = ComputeColI(bv, cv, dv, ev, powqArr, finRefCol)
-                    wsLiv.Cells(rr, COL_J).Value = ComputeColJ(bv, cv, dv, ev, powqArr)
+                    wsLiv.Cells(rr, COL_F).value = ComputeColF(bv, cv, dv, ev, crArr)
+                    wsLiv.Cells(rr, COL_G).value = ComputeColG(bv, cv, dv, ev, crArr)
+                    wsLiv.Cells(rr, COL_H).value = ComputeColH(bv, cv, dv, ev, powqArr)
+                    wsLiv.Cells(rr, COL_I).value = ComputeColI(bv, cv, dv, ev, powqArr, finRefCol)
+                    wsLiv.Cells(rr, COL_J).value = ComputeColJ(bv, cv, dv, ev, powqArr)
+                    wsLiv.Cells(rr, COL_M).value = ComputeColM(bv, cv, dv, ev, powqArr)
+                    wsLiv.Cells(rr, COL_K).value = ComputeColK(bv, cv, dv, ev, crArr)
 
-                    If rr + 1 <= UBound(livArr, 1) Then
-                        bvK = CStr(livArr(rr + 1, COL_B) & "")
-                        cvK = CStr(livArr(rr + 1, COL_C) & "")
-                        dvK = CStr(livArr(rr + 1, COL_D) & "")
-                        evK = CStr(livArr(rr + 1, COL_E) & "")
-                    Else
-                        bvK = "": cvK = "": dvK = "": evK = ""
-                    End If
-                    wsLiv.Cells(rr, COL_K).Value = ComputeColK(bvK, cvK, dvK, evK, crArr)
+                    wsLiv.Cells(rr, COL_O).value = ComputeColO(bv, cv, dv, ev, powqArr)
+                    wsLiv.Cells(rr, COL_T).value = ComputeColT(bv, cv, dv, ev, powqArr)
 
-                    wsLiv.Cells(rr, COL_O).Value = ComputeColO(bv, cv, dv, ev, powqArr)
-                    wsLiv.Cells(rr, COL_T).Value = ComputeColT(bv, cv, dv, ev, powqArr)
-
-                    wsLiv.Cells(rr, COL_A).Value = ComputeColA(bv, cv, dv, ev)
+                    wsLiv.Cells(rr, COL_A).value = ComputeColA(bv, cv, dv, ev)
                 Next rr
             End If
         Next strKey
@@ -376,8 +380,14 @@ NextCrRow:
             ' If new sprints were added in Suivi_CR for an existing STR,
             ' insert the missing sprint segments from the template.
             Set desiredSprints = GetSprintsForSTR(crArr, CStr(strKey))
+            maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, desiredSprints, sprintMap)
             Set existingSprints = CreateObject("Scripting.Dictionary")
+            Set desiredSprintSet = CreateObject("Scripting.Dictionary")
+            Set extraSprints = CreateObject("Scripting.Dictionary")
             minRow = 0: maxRow = 0
+            For Each spKey In desiredSprints
+                desiredSprintSet(CStr(spKey)) = True
+            Next spKey
             For Each matchItem In matchRows
                 rr = CLng(matchItem)
                 If minRow = 0 Or rr < minRow Then minRow = rr
@@ -385,6 +395,42 @@ NextCrRow:
                 spKey = NormalizeSprintKey(livArr(rr, COL_D))
                 If spKey <> "" Then existingSprints(CStr(spKey)) = True
             Next matchItem
+
+            ' Delete sprint rows that no longer exist in Suivi_CR for this STR.
+            If minRow > 0 Then
+                For Each spKey In existingSprints.Keys
+                    If Not desiredSprintSet.Exists(CStr(spKey)) Then
+                        If sprintMap.Exists(CStr(spKey)) Then extraSprints(CStr(spKey)) = True
+                    End If
+                Next spKey
+
+                If extraSprints.Count > 0 Then
+                    delCount = 0
+                    For rr = maxRow To minRow Step -1
+                        spKey = NormalizeSprintKey(wsLiv.Cells(rr, COL_D).value)
+                        If spKey <> "" Then
+                            If extraSprints.Exists(CStr(spKey)) Then
+                                wsLiv.Rows(rr).Delete
+                                delCount = delCount + 1
+                            End If
+                        End If
+                    Next rr
+
+                    If delCount > 0 Then
+                        livArr = LoadSheetData(wsLiv)
+                        Set matchRows = FindAllRowsBySTR(livArr, CStr(strKey))
+                        Set existingSprints = CreateObject("Scripting.Dictionary")
+                        minRow = 0: maxRow = 0
+                        For Each matchItem In matchRows
+                            rr = CLng(matchItem)
+                            If minRow = 0 Or rr < minRow Then minRow = rr
+                            If maxRow = 0 Or rr > maxRow Then maxRow = rr
+                            spKey = NormalizeSprintKey(livArr(rr, COL_D))
+                            If spKey <> "" Then existingSprints(CStr(spKey)) = True
+                        Next matchItem
+                    End If
+                End If
+            End If
 
             Set missingSprints = New Collection
             For Each spKey In desiredSprints
@@ -401,7 +447,7 @@ NextCrRow:
                         Set rangesCol = sprintMap(CStr(spKey))
                         If rangesCol.Count >= 2 Then
                             pair = rangesCol(2)
-                            swdsMarker = CStr(wsTmp.Cells(CLng(pair(0)), COL_C).Value & "")
+                            swdsMarker = CStr(wsTmp.Cells(CLng(pair(0)), COL_C).value & "")
                             Exit For
                         End If
                     End If
@@ -411,7 +457,7 @@ NextCrRow:
                 swdsStartRow = 0
                 If swdsMarker <> "" Then
                     For rr = minRow To maxRow
-                        If CStr(wsLiv.Cells(rr, COL_C).Value & "") = swdsMarker Then
+                        If CStr(wsLiv.Cells(rr, COL_C).value & "") = swdsMarker Then
                             swdsStartRow = rr
                             Exit For
                         End If
@@ -439,7 +485,7 @@ NextCrRow:
                     Application.CutCopyMode = False
 
                     For rr = insRow To insRow + segRows - 1
-                        wsLiv.Cells(rr, COL_B).Value = CStr(strKey)
+                        wsLiv.Cells(rr, COL_B).value = CStr(strKey)
                     Next rr
 
                     insRow = insRow + segRows
@@ -463,7 +509,7 @@ NextCrRow:
                     Application.CutCopyMode = False
 
                     For rr = insRow To insRow + segRows - 1
-                        wsLiv.Cells(rr, COL_B).Value = CStr(strKey)
+                        wsLiv.Cells(rr, COL_B).value = CStr(strKey)
                     Next rr
 
                     insRow = insRow + segRows
@@ -476,7 +522,7 @@ NextCrRow:
                 swdsStartRow = 0
                 If swdsMarker <> "" Then
                     For rr = minRow To maxRow
-                        If CStr(wsLiv.Cells(rr, COL_C).Value & "") = swdsMarker Then
+                        If CStr(wsLiv.Cells(rr, COL_C).value & "") = swdsMarker Then
                             swdsStartRow = rr
                             Exit For
                         End If
@@ -516,34 +562,26 @@ NextCrRow:
                 dv = CStr(livArr(rr, COL_D) & "")
                 ev = CStr(livArr(rr, COL_E) & "")
 
-                wsLiv.Cells(rr, COL_F).Value = ComputeColF(bv, cv, dv, ev, crArr)
-                wsLiv.Cells(rr, COL_G).Value = ComputeColG(bv, cv, dv, ev, crArr)
-                wsLiv.Cells(rr, COL_H).Value = ComputeColH(bv, cv, dv, ev, powqArr)
-                wsLiv.Cells(rr, COL_I).Value = ComputeColI(bv, cv, dv, ev, powqArr, finRefCol)
-                wsLiv.Cells(rr, COL_J).Value = ComputeColJ(bv, cv, dv, ev, powqArr)
+                wsLiv.Cells(rr, COL_F).value = ComputeColF(bv, cv, dv, ev, crArr)
+                wsLiv.Cells(rr, COL_G).value = ComputeColG(bv, cv, dv, ev, crArr)
+                wsLiv.Cells(rr, COL_H).value = ComputeColH(bv, cv, dv, ev, powqArr)
+                wsLiv.Cells(rr, COL_I).value = ComputeColI(bv, cv, dv, ev, powqArr, finRefCol)
+                wsLiv.Cells(rr, COL_J).value = ComputeColJ(bv, cv, dv, ev, powqArr)
+                wsLiv.Cells(rr, COL_M).value = ComputeColM(bv, cv, dv, ev, powqArr)
+                wsLiv.Cells(rr, COL_K).value = ComputeColK(bv, cv, dv, ev, crArr)
 
-                If rr + 1 <= UBound(livArr, 1) Then
-                    bvK = CStr(livArr(rr + 1, COL_B) & "")
-                    cvK = CStr(livArr(rr + 1, COL_C) & "")
-                    dvK = CStr(livArr(rr + 1, COL_D) & "")
-                    evK = CStr(livArr(rr + 1, COL_E) & "")
-                Else
-                    bvK = "": cvK = "": dvK = "": evK = ""
-                End If
-                wsLiv.Cells(rr, COL_K).Value = ComputeColK(bvK, cvK, dvK, evK, crArr)
+                wsLiv.Cells(rr, COL_O).value = ComputeColO(bv, cv, dv, ev, powqArr)
+                wsLiv.Cells(rr, COL_T).value = ComputeColT(bv, cv, dv, ev, powqArr)
 
-                wsLiv.Cells(rr, COL_O).Value = ComputeColO(bv, cv, dv, ev, powqArr)
-                wsLiv.Cells(rr, COL_T).Value = ComputeColT(bv, cv, dv, ev, powqArr)
-
-                If wsLiv.Cells(rr, COL_U).Interior.ColorIndex <> xlNone Then
+                If maxSprintKey <> "" And NormalizeSprintKey(dv) = maxSprintKey Then
                     For colI2 = COL_U To COL_X
                         If uvrColMap.Exists(colI2) Then
-                            wsLiv.Cells(rr, colI2).Value = ComputeUVRCell(bv, cv, ev, uvrArr, CLng(uvrColMap(colI2)))
+                            wsLiv.Cells(rr, colI2).value = ComputeUVRCell(bv, cv, ev, uvrArr, CLng(uvrColMap(colI2)))
                         End If
                     Next colI2
                 End If
 
-                wsLiv.Cells(rr, COL_A).Value = ComputeColA(bv, cv, dv, ev)
+                wsLiv.Cells(rr, COL_A).value = ComputeColA(bv, cv, dv, ev)
             Next matchItem
             updatedCount = updatedCount + 1
         Next strKey
@@ -559,20 +597,34 @@ NextCrRow:
     jsonSnapshot = SerializeSnapshotToJson(crArr)
     WriteTextFile statusPath, jsonSnapshot
 
-    msg = "Update completed successfully." & vbCrLf & _
-          insertedCount & " new STR block(s) inserted (" & totalInsertedRows & " rows total)." & vbCrLf & _
-          updatedCount & " existing STR(s) recomputed."
+    msg = "Update completed successfully." & vbCrLf & vbCrLf & _
+          "Actions on Suivi_Livrables:" & vbCrLf & _
+          "  - " & insertedCount & " new STR blocks inserted (" & totalInsertedRows & " rows)" & vbCrLf & _
+          "  - " & updatedCount & " existing STRs recomputed"
     MsgBox msg, vbInformation, "Suivi Update"
     GoTo Cleanup
 
 ErrHandler:
-    MsgBox "Update failed: " & Err.Description & _
-           " (Error " & Err.Number & ")", vbCritical, "Suivi Update"
+    errNumber = Err.Number
+    errMessage = Err.Description
+    errSource = Err.Source
+
+    On Error Resume Next
+    AppendTextFile configDir & "error_logs.txt", _
+        Format$(Now, "YYYY-MM-DD HH:NN:SS") & _
+        " | user=" & Environ$("USERNAME") & _
+        " | err=" & errNumber & _
+        " | src=" & errSource & _
+        " | " & errMessage
+
+    MsgBox "Update failed: " & errMessage & _
+           " (Error " & errNumber & ")", vbCritical, "Suivi Update"
     Resume Cleanup
 
 Cleanup:
     On Error Resume Next
     If lockCreated Then
+        wsCR.Unprotect Password:="suivi_update"
         wsCR.Range("I1").ClearContents
     End If
     Application.StatusBar = False
@@ -580,3 +632,5 @@ Cleanup:
     Application.Calculation = xlCalculationAutomatic
     Application.EnableEvents = True
 End Sub
+
+

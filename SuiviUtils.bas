@@ -94,42 +94,27 @@ End Function
 ' Shows a waiting window while Suivi_CR!I1 indicates update is running.
 ' wsCR: Suivi_CR worksheet; lockCell: the lock cell (e.g. "I1").
 Public Sub WaitWhileLocked(wsCR As Worksheet, ByVal lockCell As String)
-    Dim frm As Object
-    Dim lbl As Object
     Dim started As Date
     Dim lockInfo As String
     Dim lockUser As String
     Dim lockStartedAt As String
 
     started = Now
+    lockInfo = CStr(wsCR.Range(lockCell).Value & "")
+    ParseLockInfo lockInfo, lockUser, lockStartedAt
 
-    Set frm = CreateObject("Forms.UserForm.1")
-    frm.Caption = "Suivi Update"
-    frm.Width = 520
-    frm.Height = 170
-
-    Set lbl = frm.Controls.Add("Forms.Label.1", "lblInfo", True)
-    lbl.Left = 12
-    lbl.Top = 12
-    lbl.Width = frm.Width - 30
-    lbl.Height = frm.Height - 40
-    lbl.WordWrap = True
-
-    frm.Show vbModeless
+    MsgBox "Update is already in progress." & vbCrLf & vbCrLf & _
+           "User: " & lockUser & vbCrLf & _
+           "Started at: " & lockStartedAt & vbCrLf & vbCrLf & _
+           "This will wait until the update finishes.", _
+           vbInformation, "Suivi Update"
 
     Do While Trim$(CStr(wsCR.Range(lockCell).Value & "")) <> ""
-        lockInfo = CStr(wsCR.Range(lockCell).Value & "")
-        ParseLockInfo lockInfo, lockUser, lockStartedAt
-
-        lbl.Caption = "Update is currently running." & vbCrLf & vbCrLf & _
-                      "User: " & lockUser & vbCrLf & _
-                      "Started at: " & lockStartedAt & vbCrLf & vbCrLf & _
-                      "Waiting for release... (" & Format$(Now - started, "hh:nn:ss") & ")"
+        Application.StatusBar = "Suivi Update: waiting for lock release... (" & Format$(Now - started, "hh:nn:ss") & ")"
         DoEvents
         Sleep 1000
     Loop
-
-    Unload frm
+    Application.StatusBar = False
 End Sub
 
 Private Sub ParseLockInfo(lockInfo As String, ByRef lockUser As String, ByRef lockStartedAt As String)
@@ -171,6 +156,14 @@ Public Sub WriteTextFile(path As String, content As String)
     Dim fNum As Integer
     fNum = FreeFile
     Open path For Output As #fNum
+    Print #fNum, content
+    Close #fNum
+End Sub
+
+Public Sub AppendTextFile(path As String, content As String)
+    Dim fNum As Integer
+    fNum = FreeFile
+    Open path For Append As #fNum
     Print #fNum, content
     Close #fNum
 End Sub
@@ -262,6 +255,12 @@ End Function
 '  JSON SNAPSHOT -- SERIALIZE
 ' ---------------------------------------------------------
 
+Public Function SnapshotRowKey(crArr As Variant, r As Long) As String
+    SnapshotRowKey = CStr(crArr(r, COL_B) & "") & "|" & _
+                     CStr(crArr(r, COL_C) & "") & "|" & _
+                     CStr(crArr(r, COL_D) & "")
+End Function
+
 Public Function SerializeSnapshotToJson(crArr As Variant) As String
     Dim coll As Collection
     Dim r As Long
@@ -282,14 +281,16 @@ Public Function SerializeSnapshotToJson(crArr As Variant) As String
 
         Set rowDict = CreateObject("Scripting.Dictionary")
         rowDict("STR") = strVal
+        rowDict("key") = SnapshotRowKey(crArr, r)
         rowDict("row") = r
 
         Set cellsDict = CreateObject("Scripting.Dictionary")
-        For c = 1 To numCols
+        ' Snapshot only B:Q (2..17) to keep status.json small/stable.
+        For c = COL_B To 17
+            If c > numCols Then Exit For
             colLetter = ColNumToLetter(c)
             v = crArr(r, c)
             If (colLetter = "J" Or colLetter = "L" Or colLetter = "N") Then
-                ' These columns are percentages in Suivi_CR; treat 0 as empty in snapshot.
                 If IsNumeric(v) Then
                     If CDbl(v) = 0 Then
                         cellsDict(colLetter) = ""
@@ -320,7 +321,7 @@ Public Function ParseSnapshotFromJson(jsonStr As String) As Object
     Dim result As Object
     Dim coll As Object
     Dim item As Variant
-    Dim strKey As String
+    Dim rowKey As String
     Dim cellsObj As Object
     Dim cellsDict As Object
     Dim key As Variant
@@ -329,7 +330,11 @@ Public Function ParseSnapshotFromJson(jsonStr As String) As Object
     Set coll = JsonConverter.ParseJson(jsonStr)
 
     For Each item In coll
-        strKey = CStr(item("STR"))
+        If item.Exists("key") Then
+            rowKey = CStr(item("key"))
+        Else
+            rowKey = CStr(item("STR"))
+        End If
         Set cellsObj = item("cells")
         Set cellsDict = CreateObject("Scripting.Dictionary")
 
@@ -337,7 +342,7 @@ Public Function ParseSnapshotFromJson(jsonStr As String) As Object
             cellsDict(CStr(key)) = NormalizeValue(cellsObj(key))
         Next key
 
-        Set result(strKey) = cellsDict
+        Set result(rowKey) = cellsDict
     Next item
 
     Set ParseSnapshotFromJson = result
@@ -783,23 +788,21 @@ Public Function ComputeUVRCell(B As String, C As String, E As String, _
         If LCase(CStr(uvrArr(r, 1) & "")) = lookupKey Then
             v = uvrArr(r, uvrColIdx)
             If IsValidPowQValue(v) Then
-                If IsNumeric(v) Then
-                    If CDbl(v) = 0 Then
-                        ComputeUVRCell = ""
-                    Else
-                        ComputeUVRCell = v
-                    End If
+                If IsDate(v) Then
+                    ComputeUVRCell = v
+                ElseIf IsNumeric(v) Then
+                    ComputeUVRCell = CDbl(v)
                 Else
                     ComputeUVRCell = v
                 End If
             Else
-                ComputeUVRCell = ""
+                ComputeUVRCell = 0
             End If
             Exit Function
         End If
     Next r
 
-    ComputeUVRCell = ""
+    ComputeUVRCell = 0
 End Function
 
 ' Writes cols U-X values for a range of rows using the UVR data.
@@ -973,15 +976,18 @@ Public Function ComputeColF(B As String, C As String, D As String, _
     Dim cnt As Long
     Dim r As Long
     Dim lB As String, lD As String, lE As String
+    Dim valueCol As Long
 
     cnt = 0
     lB = LCase(B): lD = LCase(D): lE = LCase(E)
+    valueCol = COL_J
+    If LCase(Trim$(C)) = "swds" Then valueCol = COL_L
 
     For r = CR_FIRST_ROW To UBound(crArr, 1)
         If LCase(CStr(crArr(r, COL_B) & "")) = lB And _
            LCase(CStr(crArr(r, COL_C) & "")) = lD And _
            LCase(CStr(crArr(r, COL_D) & "")) = lE And _
-           CStr(crArr(r, COL_J) & "") <> "" Then
+           CStr(crArr(r, valueCol) & "") <> "" Then
             cnt = cnt + 1
         End If
     Next r
@@ -999,17 +1005,20 @@ Public Function ComputeColG(B As String, C As String, D As String, _
     Dim r As Long
     Dim lB As String, lD As String, lE As String
     Dim lBloque As String
+    Dim valueCol As Long
 
     cnt = 0
     lB = LCase(B): lD = LCase(D): lE = LCase(E)
     lBloque = LCase("Bloqu" & ChrW(233))
+    valueCol = COL_J
+    If LCase(Trim$(C)) = "swds" Then valueCol = COL_L
 
     For r = CR_FIRST_ROW To UBound(crArr, 1)
         If LCase(CStr(crArr(r, COL_B) & "")) = lB And _
            LCase(CStr(crArr(r, COL_C) & "")) = lD And _
            LCase(CStr(crArr(r, COL_D) & "")) = lE And _
-           CStr(crArr(r, COL_J) & "") <> "" And _
-           LCase(CStr(crArr(r, COL_G) & "")) = lBloque Then
+           CStr(crArr(r, valueCol) & "") <> "" And _
+           (LCase(CStr(crArr(r, COL_G) & "")) = lBloque Or LCase(CStr(crArr(r, COL_G) & "")) = "bloque") Then
             cnt = cnt + 1
         End If
     Next r
@@ -1022,14 +1031,12 @@ End Function
 ' ---------------------------------------------------------
 
 Public Function ComputeColH(B As String, C As String, D As String, _
-                            E As String, powqArr As Variant) As Variant
+                            E As String, powqArr As Variant) As Double
     Dim total As Double
-    Dim found As Boolean
     Dim r As Long
     Dim lB As String, lC As String, lD As String, lE As String
 
     total = 0
-    found = False
     lB = LCase(B): lC = LCase(C): lD = LCase(D): lE = LCase(E)
 
     For r = 2 To UBound(powqArr, 1)
@@ -1039,16 +1046,11 @@ Public Function ComputeColH(B As String, C As String, D As String, _
            LCase(CStr(powqArr(r, COL_U) & "")) = lD Then
             If IsValidPowQValue(powqArr(r, COL_Y)) And IsNumeric(powqArr(r, COL_Y)) Then
                 total = total + CDbl(powqArr(r, COL_Y))
-                found = True
             End If
         End If
     Next r
 
-    If found Then
-        ComputeColH = total
-    Else
-        ComputeColH = ""
-    End If
+    ComputeColH = total
 End Function
 
 ' ---------------------------------------------------------
@@ -1057,7 +1059,7 @@ End Function
 
 Public Function ComputeColI(B As String, C As String, D As String, _
                             E As String, powqArr As Variant, _
-                            finRefCol As Long) As String
+                            finRefCol As Long) As Variant
     Dim lookupKey As String
     Dim lKey As String
     Dim r As Long
@@ -1073,7 +1075,7 @@ Public Function ComputeColI(B As String, C As String, D As String, _
     For r = 2 To UBound(powqArr, 1)
         If LCase(CStr(powqArr(r, COL_A) & "")) = lKey Then
             If IsValidPowQValue(powqArr(r, finRefCol)) Then
-                ComputeColI = CStr(powqArr(r, finRefCol) & "")
+                ComputeColI = powqArr(r, finRefCol)
             Else
                 ComputeColI = ""
             End If
@@ -1084,109 +1086,133 @@ Public Function ComputeColI(B As String, C As String, D As String, _
     ComputeColI = ""
 End Function
 
+' Column M -- IFERROR(VLOOKUP(B&"/"&E&"/Reprise suite valid/Sprint "&D; PowQ_Extract A:I; 9; 0), "")
+Public Function ComputeColM(B As String, C As String, D As String, _
+                            E As String, powqArr As Variant) As Variant
+    Dim lookupKey As String
+    Dim lKey As String
+    Dim r As Long
+
+    lookupKey = B & "/" & E & "/Reprise suite valid/Sprint " & D
+    lKey = LCase(lookupKey)
+
+    For r = 2 To UBound(powqArr, 1)
+        If LCase(CStr(powqArr(r, COL_A) & "")) = lKey Then
+            If IsValidPowQValue(powqArr(r, COL_I)) Then
+                ComputeColM = powqArr(r, COL_I)
+            Else
+                ComputeColM = ""
+            End If
+            Exit Function
+        End If
+    Next r
+
+    ComputeColM = ""
+End Function
+
 ' ---------------------------------------------------------
-'  COLUMN J -- MAX(PowQ!I) where B=$B, C=$E, U=$D, F=$C
+'  COLUMN J -- MAX(PowQ_Extract I) where B=$B, C=$E, U=$D, F=$C
+'  ADL1:  I <> "" (numeric values only contribute to MAX; blank => "")
+'  SwDS:  I <> "" and I <> 0 (same matches; excludes zero)
 ' ---------------------------------------------------------
 
 Public Function ComputeColJ(B As String, C As String, D As String, _
-                            E As String, powqArr As Variant) As String
+                            E As String, powqArr As Variant) As Variant
     Dim maxVal As Double
     Dim found As Boolean
     Dim r As Long
-    Dim cellVal As String
     Dim numVal As Double
     Dim lB As String, lC As String, lD As String, lE As String
+    Dim isSwds As Boolean
+    Dim v As Variant
 
     maxVal = 0
     found = False
     lB = LCase(B): lC = LCase(C): lD = LCase(D): lE = LCase(E)
+    isSwds = (LCase(Trim$(C)) = "swds")
 
     For r = 2 To UBound(powqArr, 1)
-        cellVal = CStr(powqArr(r, COL_I) & "")
-        If cellVal <> "" And _
-           LCase(CStr(powqArr(r, COL_B) & "")) = lB And _
+        If LCase(CStr(powqArr(r, COL_B) & "")) = lB And _
            LCase(CStr(powqArr(r, COL_C) & "")) = lE And _
            LCase(CStr(powqArr(r, COL_U) & "")) = lD And _
            LCase(CStr(powqArr(r, COL_F) & "")) = lC Then
-            If IsNumeric(powqArr(r, COL_I)) Then
-                numVal = CDbl(powqArr(r, COL_I))
-                If (Not found) Or numVal > maxVal Then
-                    maxVal = numVal
-                    found = True
+
+            v = powqArr(r, COL_I)
+            If Not IsEmpty(v) And Not IsError(v) Then
+                If IsDate(v) Or IsNumeric(v) Then
+                    numVal = CDbl(v)
+                    If isSwds Then
+                        If numVal <> 0 Then
+                            If (Not found) Or numVal > maxVal Then
+                                maxVal = numVal
+                                found = True
+                            End If
+                        End If
+                    Else
+                        If (Not found) Or numVal > maxVal Then
+                            maxVal = numVal
+                            found = True
+                        End If
+                    End If
                 End If
             End If
         End If
     Next r
 
     If found Then
-        ComputeColJ = CStr(maxVal)
+        ComputeColJ = CDate(maxVal)
     Else
         ComputeColJ = ""
     End If
 End Function
 
 ' ---------------------------------------------------------
-'  COLUMN K -- Weighted average (IFS-based, row N+1 offset)
+'  COLUMN K -- Average of Suivi_CR!J (ADL1) or L (SwDS) for matching B/D/E
 ' ---------------------------------------------------------
 
 Public Function ComputeColK(B As String, C As String, D As String, _
-                            E As String, crArr As Variant) As Variant
-    Dim numerator As Double
-    Dim denominator As Double
+                            E As String, crArr As Variant) As Double
+    Dim total As Double
+    Dim cnt As Long
     Dim r As Long
-    Dim zVal As Double
-    Dim wVal As Double
     Dim lB As String, lD As String, lE As String
 
     If B = "" Then
-        ComputeColK = ""
+        ComputeColK = 0
         Exit Function
     End If
 
     lB = LCase(B): lD = LCase(D): lE = LCase(E)
 
     If LCase(C) = "adl1" Then
-        numerator = 0: denominator = 0
+        total = 0: cnt = 0
         For r = CR_FIRST_ROW To UBound(crArr, 1)
             If LCase(CStr(crArr(r, COL_B) & "")) = lB And _
                LCase(CStr(crArr(r, COL_C) & "")) = lD And _
                LCase(CStr(crArr(r, COL_D) & "")) = lE And _
-               CStr(crArr(r, COL_Z) & "") <> "" And _
                CStr(crArr(r, COL_J) & "") <> "" Then
-                zVal = CDblSafe(crArr(r, COL_Z))
-                wVal = CDblSafe(crArr(r, COL_J))
-                numerator = numerator + wVal * zVal
-                denominator = denominator + zVal
+                total = total + CDblSafe(crArr(r, COL_J))
+                cnt = cnt + 1
             End If
         Next r
-        If denominator = 0 Then
-            ComputeColK = ""
-        Else
-            ComputeColK = numerator / denominator
-        End If
 
     ElseIf LCase(C) = "swds" Or LCase(C) = "reprise suite valid" Then
-        numerator = 0: denominator = 0
+        total = 0: cnt = 0
         For r = CR_FIRST_ROW To UBound(crArr, 1)
             If LCase(CStr(crArr(r, COL_B) & "")) = lB And _
                LCase(CStr(crArr(r, COL_C) & "")) = lD And _
                LCase(CStr(crArr(r, COL_D) & "")) = lE And _
-               CStr(crArr(r, COL_Z) & "") <> "" And _
                CStr(crArr(r, COL_L) & "") <> "" Then
-                zVal = CDblSafe(crArr(r, COL_Z))
-                wVal = CDblSafe(crArr(r, COL_L))
-                numerator = numerator + wVal * zVal
-                denominator = denominator + zVal
+                total = total + CDblSafe(crArr(r, COL_L))
+                cnt = cnt + 1
             End If
         Next r
-        If denominator = 0 Then
-            ComputeColK = ""
-        Else
-            ComputeColK = numerator / denominator
-        End If
+    End If
 
+    If cnt > 0 Then
+        ComputeColK = total / cnt
     Else
-        ComputeColK = ""
+        ComputeColK = 0
     End If
 End Function
 
@@ -1195,7 +1221,7 @@ End Function
 ' ---------------------------------------------------------
 
 Public Function ComputeColO(B As String, C As String, D As String, _
-                            E As String, powqArr As Variant) As String
+                            E As String, powqArr As Variant) As Variant
     Dim lookupKey As String
     Dim lKey As String
     Dim r As Long
@@ -1206,7 +1232,7 @@ Public Function ComputeColO(B As String, C As String, D As String, _
     For r = 2 To UBound(powqArr, 1)
         If LCase(CStr(powqArr(r, COL_A) & "")) = lKey Then
             If IsValidPowQValue(powqArr(r, COL_I)) Then
-                ComputeColO = CStr(powqArr(r, COL_I) & "")
+                ComputeColO = powqArr(r, COL_I)
             Else
                 ComputeColO = ""
             End If
@@ -1222,7 +1248,7 @@ End Function
 ' ---------------------------------------------------------
 
 Public Function ComputeColT(B As String, C As String, D As String, _
-                            E As String, powqArr As Variant) As String
+                            E As String, powqArr As Variant) As Variant
     Dim lookupKey As String
     Dim lKey As String
     Dim r As Long
@@ -1233,7 +1259,7 @@ Public Function ComputeColT(B As String, C As String, D As String, _
     For r = 2 To UBound(powqArr, 1)
         If LCase(CStr(powqArr(r, COL_A) & "")) = lKey Then
             If IsValidPowQValue(powqArr(r, COL_I)) Then
-                ComputeColT = CStr(powqArr(r, COL_I) & "")
+                ComputeColT = powqArr(r, COL_I)
             Else
                 ComputeColT = ""
             End If
@@ -1251,12 +1277,22 @@ End Function
 Public Sub ArchiveSuiviLivrable()
     Dim wsLiv As Worksheet
     Dim wbNew As Workbook
+    Dim wsNew As Worksheet
+    Dim srcRng As Range
+    Dim dstRng As Range
     Dim folderPath As String
     Dim fileName As String
     Dim fullPath As String
     Dim ts As String
     Dim dayFolder As String
     Dim resp As VbMsgBoxResult
+    Dim shp As Shape
+    Dim lastRow As Long
+    Dim lastCol As Long
+    Dim c As Long
+    Dim r As Long
+    Dim cfg As String
+    Dim errLine As String
 
     If m_ArchiveRunning Then Exit Sub
     m_ArchiveRunning = True
@@ -1283,11 +1319,36 @@ Public Sub ArchiveSuiviLivrable()
     Application.EnableEvents = False
 
     Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
-    wsLiv.Copy
-    Set wbNew = ActiveWorkbook
 
-    Dim shp As Shape
-    For Each shp In wbNew.Sheets(1).Shapes
+    ' Remove any active AutoFilter so the archive covers ALL rows.
+    If wsLiv.AutoFilterMode Then wsLiv.AutoFilterMode = False
+
+    Set wbNew = Workbooks.Add(xlWBATWorksheet)
+    Set wsNew = wbNew.Worksheets(1)
+    wsNew.Name = wsLiv.Name
+
+    lastRow = wsLiv.UsedRange.Row + wsLiv.UsedRange.Rows.Count - 1
+    lastCol = wsLiv.UsedRange.Column + wsLiv.UsedRange.Columns.Count - 1
+    If lastRow < 1 Then lastRow = 1
+    If lastCol < 1 Then lastCol = 1
+
+    Set srcRng = wsLiv.Range(wsLiv.Cells(1, 1), wsLiv.Cells(lastRow, lastCol))
+    Set dstRng = wsNew.Range(wsNew.Cells(1, 1), wsNew.Cells(lastRow, lastCol))
+
+    srcRng.Copy
+    dstRng.PasteSpecial Paste:=xlPasteFormats
+    Application.CutCopyMode = False
+
+    dstRng.Value = srcRng.Value
+
+    For c = 1 To lastCol
+        wsNew.Columns(c).ColumnWidth = wsLiv.Columns(c).ColumnWidth
+    Next c
+    For r = 1 To lastRow
+        wsNew.Rows(r).RowHeight = wsLiv.Rows(r).RowHeight
+    Next r
+
+    For Each shp In wsNew.Shapes
         shp.Delete
     Next shp
 
@@ -1296,7 +1357,6 @@ Public Sub ArchiveSuiviLivrable()
                   CreateBackup:=False
     wbNew.Close SaveChanges:=False
 
-    Dim lastRow As Long
     lastRow = wsLiv.Cells(wsLiv.Rows.Count, COL_B).End(xlUp).Row
     If lastRow >= LIV_FIRST_ROW Then
         wsLiv.Rows(LIV_FIRST_ROW & ":" & lastRow).Delete Shift:=xlUp
@@ -1317,6 +1377,15 @@ Public Sub ArchiveSuiviLivrable()
     Exit Sub
 
 ErrHandler:
+    cfg = SHARED_FOLDER_PATH & "config\"
+    If Dir$(cfg, vbDirectory) = "" Then MkDir cfg
+    errLine = Format$(Now, "YYYY-MM-DD HH:NN:SS") & _
+              " | user=" & Environ$("USERNAME") & _
+              " | proc=ArchiveSuiviLivrable" & _
+              " | err=" & Err.Number & _
+              " | " & Err.Description
+    On Error Resume Next
+    AppendTextFile cfg & "error_logs.txt", errLine
     Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
@@ -1324,7 +1393,7 @@ ErrHandler:
     MsgBox "Archive failed: " & Err.Description, vbCritical
 End Sub
 
-Private Function SheetExists(shName As String) As Boolean
+Public Function SheetExists(shName As String) As Boolean
     Dim ws As Worksheet
     On Error Resume Next
     Set ws = ThisWorkbook.Sheets(shName)
