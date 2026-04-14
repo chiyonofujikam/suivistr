@@ -1,5 +1,6 @@
 Option Explicit
 
+' Sheet names used across update workflows.
 Public Const SH_CR         As String = "Suivi_CR"
 Public Const SH_LIV        As String = "Suivi_Livrables"
 Public Const SH_EXTRACT    As String = "PowQ_Extract"
@@ -7,12 +8,14 @@ Public Const SH_UVR        As String = "PowQ_Suivi_UVR"
 Public Const SH_VHST       As String = "PowQ_EDU_CE_VHST"
 Public Const SH_TMP        As String = "Suivi_Livrables_Tmp"
 
+' First data row indexes per sheet.
 Public Const CR_FIRST_ROW  As Long = 3
 Public Const LIV_FIRST_ROW As Long = 4
 
 Public Const TMP_FIRST_ROW As Long = 4
 Public Const TMP_LAST_ROW  As Long = 33
 
+' Column indexes used by the update logic.
 Public Const COL_A As Long = 1
 Public Const COL_B As Long = 2
 Public Const COL_C As Long = 3

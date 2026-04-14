@@ -1,6 +1,7 @@
 Option Explicit
 
 Public Sub UpdateSuiviLivrable()
+    ' Main orchestration: lock, detect CR changes, update Suivi_Livrables, save snapshot.
     Dim statusPath As String
     Dim lockCreated As Boolean
     Dim configDir As String
@@ -91,6 +92,7 @@ Public Sub UpdateSuiviLivrable()
     lockCreated = False
     Set wsCR = ThisWorkbook.Sheets(SH_CR)
 
+    ' Acquire workbook-level lock to avoid concurrent runs.
     If Trim$(CStr(wsCR.Range("I1").Value & "")) <> "" Then
         WaitWhileLocked wsCR, "I1"
     End If
@@ -111,6 +113,7 @@ Public Sub UpdateSuiviLivrable()
 
     statusPath = configDir & "status.json"
 
+    ' Validate setup and load source arrays.
     ValidateRequiredSheets
 
     Application.ScreenUpdating = False
@@ -149,6 +152,7 @@ Public Sub UpdateSuiviLivrable()
     Set newSTRs = New Collection
     Set modifiedRows = New Collection
 
+    ' Compare current CR rows to last snapshot.
     For r = CR_FIRST_ROW To UBound(crArr, 1)
         strVal = CStr(crArr(r, COL_B) & "")
         If strVal = "" Then GoTo NextCrRow
@@ -230,6 +234,7 @@ NextCrRow:
     Set uvrColMap = BuildUVRColumnMap(wsLiv, uvrArr)
     Set maxSprintMap = BuildMaxSprintMapVHST(vhstArr)
 
+    ' Insert missing STR blocks from template when needed.
     If strsToInsert.Count > 0 Then
         Application.StatusBar = "Suivi Update: Inserting " & strsToInsert.Count & " STR block(s)..."
 
@@ -336,6 +341,7 @@ NextCrRow:
 
     updatedCount = 0
 
+    ' Recompute existing STR blocks and synchronize sprints.
     If strsToUpdate.Count > 0 Then
         Application.StatusBar = "Suivi Update: Recomputing " & strsToUpdate.Count & " STR(s)..."
 
@@ -539,6 +545,7 @@ NextCrRow:
         Next strKey
     End If
 
+    ' Rebuild borders and persist new snapshot state.
     RebuildSuiviLivrablesBorders wsLiv, wsTmp, sprintMap, lastBorderCol
 
     Application.StatusBar = "Suivi Update: Saving snapshot..."
@@ -548,8 +555,6 @@ NextCrRow:
     msg = "Update completed successfully." & vbCrLf & vbCrLf & _
           "Changes detected in Suivi_CR:" & vbCrLf & _
           "  - " & newSTRs.Count & " new CR row(s)" & vbCrLf & _
-          "  - " & modifiedRows.Count & " modified CR row(s)" & vbCrLf & _
-          "  - " & (newSTRs.Count + modifiedRows.Count) & " total change(s)" & vbCrLf & vbCrLf & _
           "Actions on Suivi_Livrables:" & vbCrLf & _
           "  - " & insertedCount & " new STR block(s) inserted (" & totalInsertedRows & " rows)" & vbCrLf & _
           "  - " & updatedCount & " existing STR(s) recomputed"
@@ -557,6 +562,7 @@ NextCrRow:
     GoTo Cleanup
 
 ErrHandler:
+    ' Log runtime errors and show user-facing message.
     errNumber = Err.Number
     errMessage = Err.Description
     errSource = Err.Source
@@ -574,6 +580,7 @@ ErrHandler:
     Resume Cleanup
 
 Cleanup:
+    ' Always release lock and restore application settings.
     On Error Resume Next
     If lockCreated Then
         wsCR.Unprotect Password:="suivi_update"

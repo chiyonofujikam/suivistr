@@ -1,0 +1,28 @@
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
+  <ribbon startFromScratch="false">
+    <tabs>
+      <tab id="SuiviTab" label="Suivi STR">
+        <group id="SuiviGroup" label="Suivi">
+          <button id="BtnUpdate" imageMso="Refresh" size="large"
+                  label="Mise à jour"
+                  screentip="Lancer la mise à jour du Suivi Livrables à partir du Suivi CR"
+                  onAction="Ribbon_UpdateSuivi"/>
+          <button id="BtnArchive" imageMso="FileSaveAs" size="large"
+                  label="Archiver"
+                  screentip="Archiver les données du Suivi Livrables"
+                  onAction="Ribbon_ArchiveSuivi"/>
+        </group>
+        <group id="PowQGroup" label="PowQ">
+          <button id="BtnPowQExtract" imageMso="ImportExcel" size="large"
+                  label="PowQ Extract"
+                  screentip="Mettre à jour la feuille PowQ_Extract à partir d'un fichier d'entrée"
+                  onAction="Ribbon_PowQExtract"/>
+          <button id="BtnPowQUVR" imageMso="TableInsert" size="large"
+                  label="PowQ UVR"
+                  screentip="Mettre à jour le Suivi UVR depuis PowQ (en cours de développement)"
+                  onAction="Ribbon_PowQUVR"/>
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>

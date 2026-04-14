@@ -3,12 +3,7 @@ Option Explicit
 Private m_SharedFolder As String
 Private m_ArchiveRunning As Boolean
 
-#If VBA7 Then
-    Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As LongPtr)
-#Else
-    Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
-#End If
-
+' Gets and caches the shared folder selected by the user.
 Public Function SHARED_FOLDER_PATH() As String
     Dim dlg As Object
     Dim p As String
@@ -35,6 +30,7 @@ Public Function SHARED_FOLDER_PATH() As String
     SHARED_FOLDER_PATH = m_SharedFolder
 End Function
 
+' Validates that required workbook sheets exist.
 Public Sub ValidateRequiredSheets()
     Dim names As Variant
     Dim i As Long
@@ -73,10 +69,12 @@ Public Sub ValidateRequiredSheets()
     End If
 End Sub
 
+' Checks whether a file exists on disk.
 Public Function FileExists(path As String) As Boolean
     FileExists = (Dir(path) <> "")
 End Function
 
+' Waits until lock cell is cleared by another running update.
 Public Sub WaitWhileLocked(wsCR As Worksheet, ByVal lockCell As String)
     Dim started As Date
     Dim lockInfo As String
@@ -101,6 +99,7 @@ Public Sub WaitWhileLocked(wsCR As Worksheet, ByVal lockCell As String)
     Application.StatusBar = False
 End Sub
 
+' Parses lock metadata text into user and timestamp.
 Private Sub ParseLockInfo(lockInfo As String, ByRef lockUser As String, ByRef lockStartedAt As String)
     Dim s As String
     Dim pBy As Long
@@ -124,6 +123,7 @@ Private Sub ParseLockInfo(lockInfo As String, ByRef lockUser As String, ByRef lo
     End If
 End Sub
 
+' Reads a text file into a string.
 Public Function ReadTextFile(path As String) As String
     Dim fNum As Integer
     fNum = FreeFile
@@ -136,6 +136,7 @@ Public Function ReadTextFile(path As String) As String
     Close #fNum
 End Function
 
+' Overwrites a text file with content.
 Public Sub WriteTextFile(path As String, content As String)
     Dim fNum As Integer
     fNum = FreeFile
@@ -144,6 +145,7 @@ Public Sub WriteTextFile(path As String, content As String)
     Close #fNum
 End Sub
 
+' Appends a line to a text file.
 Public Sub AppendTextFile(path As String, content As String)
     Dim fNum As Integer
     fNum = FreeFile
@@ -152,6 +154,7 @@ Public Sub AppendTextFile(path As String, content As String)
     Close #fNum
 End Sub
 
+' Converts column number to Excel letter.
 Public Function ColNumToLetter(colNum As Long) As String
     Dim n As Long
     Dim result As String
@@ -165,6 +168,7 @@ Public Function ColNumToLetter(colNum As Long) As String
     ColNumToLetter = result
 End Function
 
+' Normalizes a value to stable string form for comparisons.
 Public Function NormalizeValue(v As Variant) As String
     If IsEmpty(v) Then
         NormalizeValue = ""
@@ -183,6 +187,7 @@ Public Function NormalizeValue(v As Variant) As String
     End If
 End Function
 
+' Validates PowQ cell values (non-empty, non-NaN).
 Private Function IsValidPowQValue(v As Variant) As Boolean
     If IsEmpty(v) Or IsNull(v) Or IsError(v) Then
         IsValidPowQValue = False
@@ -193,6 +198,7 @@ Private Function IsValidPowQValue(v As Variant) As Boolean
     End If
 End Function
 
+' Converts value to Double or returns 0.
 Private Function CDblSafe(v As Variant) As Double
     If IsNumeric(v) Then
         CDblSafe = CDbl(v)
@@ -201,6 +207,7 @@ Private Function CDblSafe(v As Variant) As Double
     End If
 End Function
 
+' Loads used worksheet range into a 2D array.
 Public Function LoadSheetData(ws As Worksheet) As Variant
     Dim ur As Range
     Dim lastRow As Long
@@ -231,12 +238,14 @@ Public Function LoadSheetData(ws As Worksheet) As Variant
     End If
 End Function
 
+' Builds unique snapshot key from CR row.
 Public Function SnapshotRowKey(crArr As Variant, r As Long) As String
     SnapshotRowKey = CStr(crArr(r, COL_B) & "") & "|" & _
                      CStr(crArr(r, COL_C) & "") & "|" & _
                      CStr(crArr(r, COL_D) & "")
 End Function
 
+' Serializes CR tracking data to JSON.
 Public Function SerializeSnapshotToJson(crArr As Variant) As String
     Dim coll As Collection
     Dim r As Long
@@ -288,6 +297,7 @@ NextSnapRow:
     SerializeSnapshotToJson = JsonConverter.ConvertToJson(coll, Whitespace:=2)
 End Function
 
+' Parses snapshot JSON into a row-key dictionary.
 Public Function ParseSnapshotFromJson(jsonStr As String) As Object
     Dim result As Object
     Dim coll As Object
@@ -319,6 +329,7 @@ Public Function ParseSnapshotFromJson(jsonStr As String) As Object
     Set ParseSnapshotFromJson = result
 End Function
 
+' Finds "fin ref" column index in PowQ extract.
 Public Function FindFinRefColumn(powqArr As Variant) As Long
     Dim c As Long
     For c = 1 To UBound(powqArr, 2)
@@ -330,6 +341,7 @@ Public Function FindFinRefColumn(powqArr As Variant) As Long
     FindFinRefColumn = 0
 End Function
 
+' Gets last used data row for a key column.
 Public Function GetLastDataRow(ws As Worksheet, keyCol As Long) As Long
     Dim lastRow As Long
     lastRow = ws.Cells(ws.Rows.Count, keyCol).End(xlUp).Row
@@ -337,6 +349,7 @@ Public Function GetLastDataRow(ws As Worksheet, keyCol As Long) As Long
     GetLastDataRow = lastRow
 End Function
 
+' Finds first Suivi_Livrables row for an STR.
 Public Function FindRowBySTR(livArr As Variant, strVal As String) As Long
     Dim r As Long
     Dim lStr As String
@@ -350,6 +363,7 @@ Public Function FindRowBySTR(livArr As Variant, strVal As String) As Long
     FindRowBySTR = 0
 End Function
 
+' Finds all Suivi_Livrables rows for an STR.
 Public Function FindAllRowsBySTR(livArr As Variant, strVal As String) As Collection
     Dim result As New Collection
     Dim r As Long
@@ -363,6 +377,7 @@ Public Function FindAllRowsBySTR(livArr As Variant, strVal As String) As Collect
     Set FindAllRowsBySTR = result
 End Function
 
+' Normalizes sprint value to a comparable key.
 Public Function NormalizeSprintKey(v As Variant) As String
     Dim s As String
     Dim i As Long
@@ -400,6 +415,7 @@ Public Function NormalizeSprintKey(v As Variant) As String
     NormalizeSprintKey = s
 End Function
 
+' Returns sorted sprint keys for a given STR.
 Public Function GetSprintsForSTR(crArr As Variant, strVal As String) As Collection
     Dim seen As Object
     Dim result As New Collection
@@ -452,6 +468,7 @@ Public Function GetSprintsForSTR(crArr As Variant, strVal As String) As Collecti
     Set GetSprintsForSTR = result
 End Function
 
+' Builds Max_Sprint map from VHST sheet data.
 Public Function BuildMaxSprintMapVHST(vhstArr As Variant) As Object
     Dim dict As Object
     Dim r As Long
@@ -480,6 +497,7 @@ Public Function BuildMaxSprintMapVHST(vhstArr As Variant) As Object
     Set BuildMaxSprintMapVHST = dict
 End Function
 
+' Checks whether a collection contains a value.
 Private Function CollectionContains(col As Collection, ByVal value As String) As Boolean
     Dim v As Variant
     For Each v In col
@@ -491,6 +509,7 @@ Private Function CollectionContains(col As Collection, ByVal value As String) As
     CollectionContains = False
 End Function
 
+' Resolves sprint to highlight in yellow for an STR block.
 Public Function GetYellowSprintKeyForSTR(strKey As String, maxSprintMap As Object, _
                                         strSprints As Collection, sprintMap As Object) As String
     Dim candidate As String
@@ -521,6 +540,7 @@ Public Function GetYellowSprintKeyForSTR(strKey As String, maxSprintMap As Objec
     Next i
 End Function
 
+' Builds actual max sprint map from CR data.
 Public Function BuildActualMaxSprintMapCR(crArr As Variant) As Object
     Dim dict As Object
     Dim r As Long
@@ -550,6 +570,7 @@ Public Function BuildActualMaxSprintMapCR(crArr As Variant) As Object
     Set BuildActualMaxSprintMapCR = dict
 End Function
 
+' Compares CR vs VHST max sprints and offers sync.
 Public Function CheckAndOfferUpdateVHSTMaxSprints(wsVHST As Worksheet, crArr As Variant, vhstArr As Variant) As Boolean
     Dim actualMap As Object
     Dim vhstMap As Object
@@ -606,6 +627,7 @@ Public Function CheckAndOfferUpdateVHSTMaxSprints(wsVHST As Worksheet, crArr As 
     CheckAndOfferUpdateVHSTMaxSprints = True
 End Function
 
+' Applies max sprint updates to VHST sheet.
 Private Sub ApplyVHSTMaxSprintUpdates(wsVHST As Worksheet, updates As Object)
     Dim lastRow As Long
     Dim r As Long
@@ -636,6 +658,7 @@ Private Sub ApplyVHSTMaxSprintUpdates(wsVHST As Worksheet, updates As Object)
     Next u
 End Sub
 
+' Returns numeric sort key for sprint ordering.
 Private Function SprintSortKey(s As String) As Double
     If IsNumeric(s) Then
         SprintSortKey = CDbl(s)
@@ -644,6 +667,7 @@ Private Function SprintSortKey(s As String) As Double
     End If
 End Function
 
+' Builds template row ranges by sprint key.
 Public Function BuildSprintRangeMap(ws As Worksheet) As Object
     Dim map As Object
     Dim r As Long
@@ -668,6 +692,7 @@ Public Function BuildSprintRangeMap(ws As Worksheet) As Object
     Set BuildSprintRangeMap = map
 End Function
 
+' Adds one row range entry into sprint range map.
 Private Sub SprintMapAddRange(map As Object, key As String, startR As Long, endR As Long)
     Dim col As Collection
     If key = "" Then Exit Sub
@@ -680,6 +705,7 @@ Private Sub SprintMapAddRange(map As Object, key As String, startR As Long, endR
     col.Add Array(startR, endR)
 End Sub
 
+' Copies U:X yellow formatting from template to target rows.
 Public Sub ApplyYellowSectionUtoX(wsLiv As Worksheet, ByVal destStart As Long, ByVal destEnd As Long, _
                                  wsTmp As Worksheet, ByVal srcStart As Long, ByVal srcEnd As Long)
     Dim i As Long
@@ -692,6 +718,7 @@ Public Sub ApplyYellowSectionUtoX(wsLiv As Worksheet, ByVal destStart As Long, B
     Next i
 End Sub
 
+' Maps Suivi U:X headers to UVR source columns.
 Public Function BuildUVRColumnMap(wsLiv As Worksheet, uvrArr As Variant) As Object
     Dim dict As Object
     Dim colIdx As Long
@@ -715,6 +742,7 @@ Public Function BuildUVRColumnMap(wsLiv As Worksheet, uvrArr As Variant) As Obje
     Set BuildUVRColumnMap = dict
 End Function
 
+' Computes one UVR value lookup for a target row.
 Public Function ComputeUVRCell(B As String, C As String, E As String, _
                                uvrArr As Variant, ByVal uvrColIdx As Long) As Variant
     Dim lookupKey As String
@@ -744,6 +772,7 @@ Public Function ComputeUVRCell(B As String, C As String, E As String, _
     ComputeUVRCell = 0
 End Function
 
+' Writes U:X values for yellow-highlighted rows.
 Public Sub WriteYellowValuesUtoX(wsLiv As Worksheet, ByVal destStart As Long, ByVal destEnd As Long, _
                                  uvrArr As Variant, uvrColMap As Object, livArr As Variant)
     Dim rr As Long
@@ -763,6 +792,7 @@ Public Sub WriteYellowValuesUtoX(wsLiv As Worksheet, ByVal destStart As Long, By
     Next rr
 End Sub
 
+' Draws thin gray border around a row block.
 Public Sub ApplyLightOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal bottomRow As Long, _
                                   ByVal lastCol As Long)
     Dim rng As Range
@@ -790,6 +820,7 @@ Public Sub ApplyLightOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal 
     End With
 End Sub
 
+' Draws medium black border around a row block.
 Public Sub ApplyHardOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal bottomRow As Long, _
                                   ByVal lastCol As Long)
     Dim rng As Range
@@ -817,6 +848,7 @@ Public Sub ApplyHardOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal b
     End With
 End Sub
 
+' Rebuilds block borders for all STR sections.
 Public Sub RebuildSuiviLivrablesBorders(wsLiv As Worksheet, wsTmp As Worksheet, sprintMap As Object, ByVal lastCol As Long)
     Dim lastRow As Long
     Dim r As Long
@@ -887,6 +919,7 @@ NextBlock:
     Loop
 End Sub
 
+' Computes Suivi column A key.
 Public Function ComputeColA(B As String, C As String, D As String, E As String) As String
     If Trim$(B) = "" Then
         ComputeColA = ""
@@ -895,6 +928,7 @@ Public Function ComputeColA(B As String, C As String, D As String, E As String) 
     End If
 End Function
 
+' Computes count metric for column F.
 Public Function ComputeColF(B As String, C As String, D As String, _
                             E As String, crArr As Variant) As Long
     Dim cnt As Long
@@ -919,6 +953,7 @@ Public Function ComputeColF(B As String, C As String, D As String, _
     ComputeColF = cnt
 End Function
 
+' Computes blocked count metric for column G.
 Public Function ComputeColG(B As String, C As String, D As String, _
                             E As String, crArr As Variant) As Long
     Dim cnt As Long
@@ -946,6 +981,7 @@ Public Function ComputeColG(B As String, C As String, D As String, _
     ComputeColG = cnt
 End Function
 
+' Computes aggregated effort for column H.
 Public Function ComputeColH(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As Double
     Dim total As Double
@@ -969,6 +1005,7 @@ Public Function ComputeColH(B As String, C As String, D As String, _
     ComputeColH = total
 End Function
 
+' Computes Fin Ref value for column I.
 Public Function ComputeColI(B As String, C As String, D As String, _
                             E As String, powqArr As Variant, _
                             finRefCol As Long) As Variant
@@ -998,6 +1035,7 @@ Public Function ComputeColI(B As String, C As String, D As String, _
     ComputeColI = ""
 End Function
 
+' Computes reprise reference date for column M.
 Public Function ComputeColM(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As Variant
     Dim lookupKey As String
@@ -1021,6 +1059,7 @@ Public Function ComputeColM(B As String, C As String, D As String, _
     ComputeColM = ""
 End Function
 
+' Computes latest relevant date for column J.
 Public Function ComputeColJ(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As Variant
     Dim maxVal As Double
@@ -1071,6 +1110,7 @@ Public Function ComputeColJ(B As String, C As String, D As String, _
     End If
 End Function
 
+' Computes average metric for column K.
 Public Function ComputeColK(B As String, C As String, D As String, _
                             E As String, crArr As Variant) As Double
     Dim total As Double
@@ -1117,6 +1157,7 @@ Public Function ComputeColK(B As String, C As String, D As String, _
     End If
 End Function
 
+' Computes UVR date for column O.
 Public Function ComputeColO(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As Variant
     Dim lookupKey As String
@@ -1140,6 +1181,7 @@ Public Function ComputeColO(B As String, C As String, D As String, _
     ComputeColO = ""
 End Function
 
+' Computes UVR OK date for column T.
 Public Function ComputeColT(B As String, C As String, D As String, _
                             E As String, powqArr As Variant) As Variant
     Dim lookupKey As String
@@ -1163,6 +1205,7 @@ Public Function ComputeColT(B As String, C As String, D As String, _
     ComputeColT = ""
 End Function
 
+' Archives Suivi_Livrables into dated workbook and clears current data.
 Public Sub ArchiveSuiviLivrable()
     Dim wsLiv As Worksheet
     Dim wbNew As Workbook
@@ -1188,6 +1231,7 @@ Public Sub ArchiveSuiviLivrable()
 
     On Error GoTo ErrHandler
 
+    ' Validate sheet and prepare output folder/file names.
     If Not SheetExists(SH_LIV) Then
         MsgBox "Sheet """ & SH_LIV & """ not found.", vbExclamation
         Exit Sub
@@ -1207,6 +1251,7 @@ Public Sub ArchiveSuiviLivrable()
     Application.DisplayAlerts = False
     Application.EnableEvents = False
 
+    ' Copy sheet values + formatting into a new workbook.
     Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
 
     If wsLiv.AutoFilterMode Then wsLiv.AutoFilterMode = False
@@ -1245,6 +1290,7 @@ Public Sub ArchiveSuiviLivrable()
                   CreateBackup:=False
     wbNew.Close SaveChanges:=False
 
+    ' Reset active livrables rows after archive save.
     lastRow = wsLiv.Cells(wsLiv.Rows.Count, COL_B).End(xlUp).Row
     If lastRow >= LIV_FIRST_ROW Then
         wsLiv.Rows(LIV_FIRST_ROW & ":" & lastRow).Delete Shift:=xlUp
@@ -1265,6 +1311,7 @@ Public Sub ArchiveSuiviLivrable()
     Exit Sub
 
 ErrHandler:
+    ' Log archive error and restore application state.
     cfg = SHARED_FOLDER_PATH & "config\"
     If Dir$(cfg, vbDirectory) = "" Then MkDir cfg
     errLine = Format$(Now, "YYYY-MM-DD HH:NN:SS") & _
@@ -1281,6 +1328,7 @@ ErrHandler:
     MsgBox "Archive failed: " & Err.Description, vbCritical
 End Sub
 
+' Checks whether a sheet exists in current workbook.
 Public Function SheetExists(shName As String) As Boolean
     Dim ws As Worksheet
     On Error Resume Next
