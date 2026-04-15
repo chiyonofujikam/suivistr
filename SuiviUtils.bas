@@ -3,6 +3,12 @@ Option Explicit
 Private m_SharedFolder As String
 Private m_ArchiveRunning As Boolean
 
+#If VBA7 Then
+    Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As LongPtr)
+#Else
+    Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
+#End If
+
 ' Gets and caches the shared folder selected by the user.
 Public Function SHARED_FOLDER_PATH() As String
     Dim dlg As Object
@@ -76,28 +82,69 @@ End Function
 
 ' Waits until lock cell is cleared by another running update.
 Public Sub WaitWhileLocked(wsCR As Worksheet, ByVal lockCell As String)
-    Dim started As Date
     Dim lockInfo As String
     Dim lockUser As String
     Dim lockStartedAt As String
+    Dim lockDate As Date
+    Dim lockAgeMinutes As Double
+    Dim resp As VbMsgBoxResult
+    Const STALE_LOCK_MINUTES As Double = 30#
 
-    started = Now
     lockInfo = CStr(wsCR.Range(lockCell).Value & "")
     ParseLockInfo lockInfo, lockUser, lockStartedAt
 
-    MsgBox "Update is already in progress." & vbCrLf & vbCrLf & _
-           "User: " & lockUser & vbCrLf & _
-           "Started at: " & lockStartedAt & vbCrLf & vbCrLf & _
-           "This will wait until the update finishes.", _
-           vbInformation, "Suivi Update"
+    If TryParseLockDateTime(lockStartedAt, lockDate) Then
+        lockAgeMinutes = DateDiff("s", lockDate, Now) / 60#
+        If lockAgeMinutes >= STALE_LOCK_MINUTES Then
+            resp = MsgBox("Une mise a jour est indiquee en cours depuis " & Format$(lockDate, "dd/mm/yyyy hh:nn:ss") & "." & vbCrLf & vbCrLf & _
+                          "Utilisateur : " & lockUser & vbCrLf & _
+                          "Duree du verrou : " & Format$(lockAgeMinutes, "0") & " minute(s)" & vbCrLf & vbCrLf & _
+                          "Le verrou semble ancien. Voulez-vous le supprimer maintenant ?", _
+                          vbYesNo + vbExclamation, "Verrou potentiellement bloque")
+            If resp = vbYes Then
+                On Error Resume Next
+                wsCR.Unprotect Password:="suivi_update"
+                wsCR.Range(lockCell).ClearContents
+                On Error GoTo 0
+                Exit Sub
+            End If
+        End If
+    End If
 
-    Do While Trim$(CStr(wsCR.Range(lockCell).Value & "")) <> ""
-        Application.StatusBar = "Suivi Update: waiting for lock release... (" & Format$(Now - started, "hh:nn:ss") & ")"
-        DoEvents
-        Sleep 1000
-    Loop
-    Application.StatusBar = False
+    MsgBox "Une mise a jour est deja en cours." & vbCrLf & vbCrLf & _
+           "Utilisateur : " & lockUser & vbCrLf & _
+           "Demarree a : " & lockStartedAt & vbCrLf & vbCrLf & _
+           "Veuillez recliquer sur ""Mise a jour"" une fois le traitement termine.", _
+           vbInformation, "Mise a jour Suivi"
+    Err.Raise vbObjectError + 1002, "WaitWhileLocked", "Update already running. Retry later."
 End Sub
+
+' Parses lock datetime formatted as "YYYY-MM-DD HH:NN:SS".
+Private Function TryParseLockDateTime(ByVal s As String, ByRef parsed As Date) As Boolean
+    Dim y As Integer
+    Dim m As Integer
+    Dim d As Integer
+    Dim hh As Integer
+    Dim nn As Integer
+    Dim ss As Integer
+
+    On Error GoTo ParseFail
+    If Len(Trim$(s)) < 19 Then GoTo ParseFail
+
+    y = CInt(Mid$(s, 1, 4))
+    m = CInt(Mid$(s, 6, 2))
+    d = CInt(Mid$(s, 9, 2))
+    hh = CInt(Mid$(s, 12, 2))
+    nn = CInt(Mid$(s, 15, 2))
+    ss = CInt(Mid$(s, 18, 2))
+
+    parsed = DateSerial(y, m, d) + TimeSerial(hh, nn, ss)
+    TryParseLockDateTime = True
+    Exit Function
+
+ParseFail:
+    TryParseLockDateTime = False
+End Function
 
 ' Parses lock metadata text into user and timestamp.
 Private Sub ParseLockInfo(lockInfo As String, ByRef lockUser As String, ByRef lockStartedAt As String)
@@ -105,8 +152,8 @@ Private Sub ParseLockInfo(lockInfo As String, ByRef lockUser As String, ByRef lo
     Dim pBy As Long
     Dim pAt As Long
 
-    lockUser = "Unknown"
-    lockStartedAt = "Unknown"
+    lockUser = "Inconnu"
+    lockStartedAt = "Inconnu"
 
     s = Trim$(Replace(lockInfo, vbCr, ""))
     If s = "" Then Exit Sub
@@ -468,6 +515,61 @@ Public Function GetSprintsForSTR(crArr As Variant, strVal As String) As Collecti
     Set GetSprintsForSTR = result
 End Function
 
+' Returns target sprint keys for an STR using VHST max sprint when available.
+Public Function GetTargetSprintsForSTR(crArr As Variant, strVal As String, _
+                                       maxSprintMap As Object, sprintMap As Object) As Collection
+    Dim result As New Collection
+    Dim maxSprint As String
+    Dim maxVal As Double
+    Dim key As Variant
+    Dim arr() As String
+    Dim n As Long
+    Dim i As Long
+    Dim j As Long
+    Dim tmp As String
+
+    If Not maxSprintMap Is Nothing Then
+        If maxSprintMap.Exists(Trim$(CStr(strVal & ""))) Then
+            maxSprint = NormalizeSprintKey(maxSprintMap(Trim$(CStr(strVal & ""))))
+            If IsNumeric(maxSprint) Then
+                maxVal = CDbl(maxSprint)
+
+                If Not sprintMap Is Nothing Then
+                    ReDim arr(0 To sprintMap.Count - 1)
+                    n = 0
+                    For Each key In sprintMap.Keys
+                        arr(n) = CStr(key)
+                        n = n + 1
+                    Next key
+
+                    For i = LBound(arr) To UBound(arr) - 1
+                        For j = i + 1 To UBound(arr)
+                            If SprintSortKey(arr(j)) < SprintSortKey(arr(i)) Then
+                                tmp = arr(i): arr(i) = arr(j): arr(j) = tmp
+                            End If
+                        Next j
+                    Next i
+
+                    For i = LBound(arr) To UBound(arr)
+                        If IsNumeric(arr(i)) Then
+                            If CDbl(arr(i)) <= maxVal Then
+                                result.Add arr(i)
+                            End If
+                        End If
+                    Next i
+                End If
+
+                If result.Count > 0 Then
+                    Set GetTargetSprintsForSTR = result
+                    Exit Function
+                End If
+            End If
+        End If
+    End If
+
+    Set GetTargetSprintsForSTR = GetSprintsForSTR(crArr, strVal)
+End Function
+
 ' Builds Max_Sprint map from VHST sheet data.
 Public Function BuildMaxSprintMapVHST(vhstArr As Variant) As Object
     Dim dict As Object
@@ -476,6 +578,7 @@ Public Function BuildMaxSprintMapVHST(vhstArr As Variant) As Object
     Dim sp As String
 
     Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbTextCompare
 
     If IsEmpty(vhstArr) Then
         Set BuildMaxSprintMapVHST = dict
@@ -487,7 +590,7 @@ Public Function BuildMaxSprintMapVHST(vhstArr As Variant) As Object
     End If
 
     For r = 2 To UBound(vhstArr, 1)
-        k = LCase(Trim$(CStr(vhstArr(r, 1) & "")))
+        k = Trim$(CStr(vhstArr(r, 1) & ""))
         If k <> "" Then
             sp = NormalizeSprintKey(vhstArr(r, 2))
             If sp <> "" Then dict(k) = sp
@@ -495,6 +598,34 @@ Public Function BuildMaxSprintMapVHST(vhstArr As Variant) As Object
     Next r
 
     Set BuildMaxSprintMapVHST = dict
+End Function
+
+' Builds unique STR set from VHST sheet (column A).
+Public Function BuildSTRMapVHST(vhstArr As Variant) As Object
+    Dim dict As Object
+    Dim r As Long
+    Dim k As String
+
+    Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbTextCompare
+
+    If IsEmpty(vhstArr) Then
+        Set BuildSTRMapVHST = dict
+        Exit Function
+    End If
+    If UBound(vhstArr, 1) < 2 Then
+        Set BuildSTRMapVHST = dict
+        Exit Function
+    End If
+
+    For r = 2 To UBound(vhstArr, 1)
+        k = Trim$(CStr(vhstArr(r, 1) & ""))
+        If k <> "" Then
+            If Not dict.Exists(k) Then dict(k) = True
+        End If
+    Next r
+
+    Set BuildSTRMapVHST = dict
 End Function
 
 ' Checks whether a collection contains a value.
@@ -517,7 +648,7 @@ Public Function GetYellowSprintKeyForSTR(strKey As String, maxSprintMap As Objec
     Dim i As Long
 
     GetYellowSprintKeyForSTR = ""
-    k = LCase(Trim$(CStr(strKey & "")))
+    k = Trim$(CStr(strKey & ""))
 
     If Not maxSprintMap Is Nothing Then
         If maxSprintMap.Exists(k) Then
@@ -550,9 +681,10 @@ Public Function BuildActualMaxSprintMapCR(crArr As Variant) As Object
     Dim cur As Double
 
     Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbTextCompare
 
     For r = CR_FIRST_ROW To UBound(crArr, 1)
-        k = LCase(Trim$(CStr(crArr(r, COL_B) & "")))
+        k = Trim$(CStr(crArr(r, COL_B) & ""))
         If k <> "" Then
             sp = NormalizeSprintKey(crArr(r, COL_C))
             If IsNumeric(sp) Then
@@ -574,19 +706,14 @@ End Function
 Public Function CheckAndOfferUpdateVHSTMaxSprints(wsVHST As Worksheet, crArr As Variant, vhstArr As Variant) As Boolean
     Dim actualMap As Object
     Dim vhstMap As Object
-    Dim updates As Object
     Dim k As Variant
     Dim a As Double, v As Double
     Dim msg As String
-    Dim shown As Long
     Dim resp As VbMsgBoxResult
+    Dim oneUpdate As Object
 
     Set actualMap = BuildActualMaxSprintMapCR(crArr)
     Set vhstMap = BuildMaxSprintMapVHST(vhstArr)
-    Set updates = CreateObject("Scripting.Dictionary")
-
-    msg = "Some STR(s) have a sprint in Suivi_CR higher than the Max_Sprint in " & SH_VHST & ":" & vbCrLf & vbCrLf
-    shown = 0
 
     For Each k In actualMap.Keys
         a = CDbl(actualMap(k))
@@ -601,28 +728,22 @@ Public Function CheckAndOfferUpdateVHSTMaxSprints(wsVHST As Worksheet, crArr As 
         End If
 
         If a > v Then
-            updates(k) = CStr(CLng(a))
-            If shown < 20 Then
-                msg = msg & "- " & CStr(k) & " : VHST=" & CStr(CLng(v)) & " / CR=" & CStr(CLng(a)) & vbCrLf
-                shown = shown + 1
+            msg = "La STR suivante a un sprint dans Suivi_CR superieur a " & SH_VHST & " :" & vbCrLf & vbCrLf & _
+                  "STR : " & CStr(k) & vbCrLf & _
+                  SH_VHST & " (Max_Sprint) : " & CStr(CLng(v)) & vbCrLf & _
+                  "Suivi_CR (Sprint max) : " & CStr(CLng(a)) & vbCrLf & vbCrLf & _
+                  "Voulez-vous mettre a jour " & SH_VHST & " pour cette STR ?"
+
+            resp = MsgBox(msg, vbYesNoCancel + vbExclamation, "Incoherence Max Sprint")
+            If resp = vbYes Then
+                Set oneUpdate = CreateObject("Scripting.Dictionary")
+                oneUpdate(CStr(k)) = CStr(CLng(a))
+                ApplyVHSTMaxSprintUpdates wsVHST, oneUpdate
+            ElseIf resp = vbCancel Then
+                Exit For
             End If
         End If
     Next k
-
-    If updates.Count = 0 Then
-        CheckAndOfferUpdateVHSTMaxSprints = True
-        Exit Function
-    End If
-
-    If updates.Count > shown Then
-        msg = msg & vbCrLf & "(+" & (updates.Count - shown) & " more)"
-    End If
-    msg = msg & vbCrLf & vbCrLf & "Do you want to update " & SH_VHST & " Max_Sprint values now?"
-
-    resp = MsgBox(msg, vbYesNo + vbExclamation, "Max Sprint mismatch")
-    If resp = vbYes Then
-        ApplyVHSTMaxSprintUpdates wsVHST, updates
-    End If
 
     CheckAndOfferUpdateVHSTMaxSprints = True
 End Function
@@ -643,7 +764,7 @@ Private Sub ApplyVHSTMaxSprintUpdates(wsVHST As Worksheet, updates As Object)
         found = False
 
         For r = 2 To lastRow
-            If LCase(Trim$(CStr(wsVHST.Cells(r, 1).Value & ""))) = k Then
+            If StrComp(Trim$(CStr(wsVHST.Cells(r, 1).Value & "")), k, vbTextCompare) = 0 Then
                 wsVHST.Cells(r, 2).Value = updates(u)
                 found = True
                 Exit For
@@ -744,7 +865,8 @@ End Function
 
 ' Computes one UVR value lookup for a target row.
 Public Function ComputeUVRCell(B As String, C As String, E As String, _
-                               uvrArr As Variant, ByVal uvrColIdx As Long) As Variant
+                               uvrArr As Variant, ByVal uvrColIdx As Long, _
+                               Optional ByVal destColIdx As Long = 0) As Variant
     Dim lookupKey As String
     Dim r As Long
     Dim v As Variant
@@ -754,22 +876,64 @@ Public Function ComputeUVRCell(B As String, C As String, E As String, _
     For r = 2 To UBound(uvrArr, 1)
         If LCase(CStr(uvrArr(r, 1) & "")) = lookupKey Then
             v = uvrArr(r, uvrColIdx)
-            If IsValidPowQValue(v) Then
-                If IsDate(v) Then
-                    ComputeUVRCell = v
-                ElseIf IsNumeric(v) Then
-                    ComputeUVRCell = CDbl(v)
-                Else
-                    ComputeUVRCell = v
-                End If
-            Else
-                ComputeUVRCell = 0
-            End If
+            ComputeUVRCell = NormalizeUVRCellByDestCol(v, destColIdx)
             Exit Function
         End If
     Next r
 
-    ComputeUVRCell = 0
+    ComputeUVRCell = NormalizeUVRCellByDestCol(Empty, destColIdx)
+End Function
+
+' Normalizes UVR value by destination column expected type.
+Private Function NormalizeUVRCellByDestCol(v As Variant, ByVal destColIdx As Long) As Variant
+    Select Case destColIdx
+        Case COL_U, COL_X
+            ' U and X are date fields: keep blank when missing/0.
+            If IsValidPowQValue(v) Then
+                If IsDate(v) Then
+                    NormalizeUVRCellByDestCol = CDate(v)
+                ElseIf IsNumeric(v) Then
+                    If CDbl(v) = 0 Then
+                        NormalizeUVRCellByDestCol = ""
+                    Else
+                        NormalizeUVRCellByDestCol = CDate(CDbl(v))
+                    End If
+                Else
+                    NormalizeUVRCellByDestCol = ""
+                End If
+            Else
+                NormalizeUVRCellByDestCol = ""
+            End If
+
+        Case COL_V
+            ' V is numeric.
+            If IsValidPowQValue(v) And IsNumeric(v) Then
+                NormalizeUVRCellByDestCol = CDbl(v)
+            Else
+                NormalizeUVRCellByDestCol = 0
+            End If
+
+        Case COL_W
+            ' W is text.
+            If IsValidPowQValue(v) Then
+                NormalizeUVRCellByDestCol = CStr(v)
+            Else
+                NormalizeUVRCellByDestCol = ""
+            End If
+
+        Case Else
+            If IsValidPowQValue(v) Then
+                If IsDate(v) Then
+                    NormalizeUVRCellByDestCol = v
+                ElseIf IsNumeric(v) Then
+                    NormalizeUVRCellByDestCol = CDbl(v)
+                Else
+                    NormalizeUVRCellByDestCol = v
+                End If
+            Else
+                NormalizeUVRCellByDestCol = ""
+            End If
+    End Select
 End Function
 
 ' Writes U:X values for yellow-highlighted rows.
@@ -786,7 +950,7 @@ Public Sub WriteYellowValuesUtoX(wsLiv As Worksheet, ByVal destStart As Long, By
 
         For colIdx = COL_U To COL_X
             If uvrColMap.Exists(colIdx) Then
-                wsLiv.Cells(rr, colIdx).Value = ComputeUVRCell(bv, cv, ev, uvrArr, CLng(uvrColMap(colIdx)))
+                wsLiv.Cells(rr, colIdx).Value = ComputeUVRCell(bv, cv, ev, uvrArr, CLng(uvrColMap(colIdx)), colIdx)
             End If
         Next colIdx
     Next rr
@@ -1218,6 +1382,7 @@ Public Sub ArchiveSuiviLivrable()
     Dim ts As String
     Dim dayFolder As String
     Dim resp As VbMsgBoxResult
+    Dim confirmResp As VbMsgBoxResult
     Dim shp As Shape
     Dim lastRow As Long
     Dim lastCol As Long
@@ -1233,9 +1398,14 @@ Public Sub ArchiveSuiviLivrable()
 
     ' Validate sheet and prepare output folder/file names.
     If Not SheetExists(SH_LIV) Then
-        MsgBox "Sheet """ & SH_LIV & """ not found.", vbExclamation
+        MsgBox "La feuille """ & SH_LIV & """ est introuvable.", vbExclamation
         Exit Sub
     End If
+
+    confirmResp = MsgBox("Confirmer l'archivage de """ & SH_LIV & """ ?" & vbCrLf & vbCrLf & _
+                         "Cette action va sauvegarder l'etat actuel puis vider les lignes actives de la feuille.", _
+                         vbYesNo + vbQuestion + vbDefaultButton2, "Confirmation archivage")
+    If confirmResp <> vbYes Then Exit Sub
 
     folderPath = SHARED_FOLDER_PATH & "Archived\"
     If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
@@ -1253,7 +1423,6 @@ Public Sub ArchiveSuiviLivrable()
 
     ' Copy sheet values + formatting into a new workbook.
     Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
-
     If wsLiv.AutoFilterMode Then wsLiv.AutoFilterMode = False
 
     Set wbNew = Workbooks.Add(xlWBATWorksheet)
@@ -1296,18 +1465,18 @@ Public Sub ArchiveSuiviLivrable()
         wsLiv.Rows(LIV_FIRST_ROW & ":" & lastRow).Delete Shift:=xlUp
     End If
 
-    Application.EnableEvents = True
-    Application.DisplayAlerts = True
-    Application.ScreenUpdating = True
-    m_ArchiveRunning = False
-
-    resp = MsgBox("Archive saved & sheet reset." & vbCrLf & vbCrLf & _
-                  "Open the archived file now?" & vbCrLf & fullPath, _
+    resp = MsgBox("Archive enregistree et feuille reinitialisee." & vbCrLf & vbCrLf & _
+                  "Ouvrir le fichier archive maintenant ?" & vbCrLf & fullPath, _
                   vbYesNo + vbInformation, "Archive")
     If resp = vbYes Then
         ThisWorkbook.FollowHyperlink fullPath
     End If
 
+Cleanup:
+    Application.EnableEvents = True
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    m_ArchiveRunning = False
     Exit Sub
 
 ErrHandler:
@@ -1325,7 +1494,7 @@ ErrHandler:
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
     m_ArchiveRunning = False
-    MsgBox "Archive failed: " & Err.Description, vbCritical
+    MsgBox "Echec de l'archivage : " & Err.Description, vbCritical
 End Sub
 
 ' Checks whether a sheet exists in current workbook.

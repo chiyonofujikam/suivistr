@@ -32,5 +32,7 @@ Public Const COL_M As Long = 13
 Public Const COL_O As Long = 15
 Public Const COL_T As Long = 20
 Public Const COL_U As Long = 21
+Public Const COL_V As Long = 22
+Public Const COL_W As Long = 23
 Public Const COL_X As Long = 24
 Public Const COL_Y As Long = 25

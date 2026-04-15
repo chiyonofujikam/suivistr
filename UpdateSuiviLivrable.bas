@@ -87,6 +87,8 @@ Public Sub UpdateSuiviLivrable()
     Dim errMessage As String
     Dim errSource As String
     Dim rowKey As String
+    Dim vhstSTRMap As Object
+    Dim vhstKey As Variant
 
     On Error GoTo ErrHandler
     lockCreated = False
@@ -119,7 +121,7 @@ Public Sub UpdateSuiviLivrable()
     Application.ScreenUpdating = False
     Application.Calculation = xlCalculationManual
     Application.EnableEvents = False
-    Application.StatusBar = "Suivi Update: Loading data..."
+    Application.StatusBar = "Mise a jour Suivi : chargement des donnees..."
 
     crArr = LoadSheetData(ThisWorkbook.Sheets(SH_CR))
     powqArr = LoadSheetData(ThisWorkbook.Sheets(SH_EXTRACT))
@@ -136,12 +138,12 @@ Public Sub UpdateSuiviLivrable()
     End If
 
     If isFirstRun Then
-        Application.StatusBar = "Suivi Update: Creating initial snapshot..."
+        Application.StatusBar = "Mise a jour Suivi : creation du snapshot initial..."
         jsonSnapshot = SerializeSnapshotToJson(crArr)
         WriteTextFile statusPath, jsonSnapshot
     End If
 
-    Application.StatusBar = "Suivi Update: Computing changes..."
+    Application.StatusBar = "Mise a jour Suivi : calcul des changements..."
     If isFirstRun Then
         Set oldSnapshot = CreateObject("Scripting.Dictionary")
     Else
@@ -191,13 +193,6 @@ Public Sub UpdateSuiviLivrable()
 NextCrRow:
     Next r
 
-    If newSTRs.Count = 0 And modifiedRows.Count = 0 Then
-        jsonSnapshot = SerializeSnapshotToJson(crArr)
-        WriteTextFile statusPath, jsonSnapshot
-        MsgBox "No changes detected since last update.", vbInformation, "Suivi Update"
-        GoTo Cleanup
-    End If
-
     Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
     Set wsTmp = ThisWorkbook.Sheets(SH_TMP)
     livArr = LoadSheetData(wsLiv)
@@ -228,6 +223,31 @@ NextCrRow:
         End If
     Next strKey
 
+    Set vhstSTRMap = CreateObject("Scripting.Dictionary")
+    vhstSTRMap.CompareMode = vbTextCompare
+    If Not IsEmpty(vhstArr) Then
+        If UBound(vhstArr, 1) >= 2 Then
+            For rr = 2 To UBound(vhstArr, 1)
+                vhstKey = Trim$(CStr(vhstArr(rr, COL_A) & ""))
+                If CStr(vhstKey) <> "" Then
+                    If Not vhstSTRMap.Exists(CStr(vhstKey)) Then vhstSTRMap(CStr(vhstKey)) = True
+                End If
+            Next rr
+        End If
+    End If
+    For Each vhstKey In vhstSTRMap.Keys
+        If FindRowBySTR(livArr, CStr(vhstKey)) = 0 Then
+            strsToInsert(CStr(vhstKey)) = True
+        End If
+    Next vhstKey
+
+    If strsToInsert.Count = 0 And strsToUpdate.Count = 0 Then
+        jsonSnapshot = SerializeSnapshotToJson(crArr)
+        WriteTextFile statusPath, jsonSnapshot
+        MsgBox "Aucun changement detecte depuis la derniere mise a jour.", vbInformation, "Mise a jour Suivi"
+        GoTo Cleanup
+    End If
+
     insertedCount = 0
     totalInsertedRows = 0
     Set yellowRanges = New Collection
@@ -236,7 +256,7 @@ NextCrRow:
 
     ' Insert missing STR blocks from template when needed.
     If strsToInsert.Count > 0 Then
-        Application.StatusBar = "Suivi Update: Inserting " & strsToInsert.Count & " STR block(s)..."
+        Application.StatusBar = "Mise a jour Suivi : insertion de " & strsToInsert.Count & " bloc(s) STR..."
 
         Set blockInfo = CreateObject("Scripting.Dictionary")
 
@@ -245,7 +265,7 @@ NextCrRow:
         insertRow = firstNewRow
 
         For Each strKey In strsToInsert.Keys
-            Set strSprints = GetSprintsForSTR(crArr, CStr(strKey))
+            Set strSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap, sprintMap)
             maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, strSprints, sprintMap)
 
             blockStartRow = insertRow
@@ -343,12 +363,12 @@ NextCrRow:
 
     ' Recompute existing STR blocks and synchronize sprints.
     If strsToUpdate.Count > 0 Then
-        Application.StatusBar = "Suivi Update: Recomputing " & strsToUpdate.Count & " STR(s)..."
+        Application.StatusBar = "Mise a jour Suivi : recalcul de " & strsToUpdate.Count & " STR..."
 
         For Each strKey In strsToUpdate.Keys
             Set matchRows = FindAllRowsBySTR(livArr, CStr(strKey))
 
-            Set desiredSprints = GetSprintsForSTR(crArr, CStr(strKey))
+            Set desiredSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap, sprintMap)
             maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, desiredSprints, sprintMap)
             Set existingSprints = CreateObject("Scripting.Dictionary")
             Set desiredSprintSet = CreateObject("Scripting.Dictionary")
@@ -495,7 +515,7 @@ NextCrRow:
 
                 livArr = LoadSheetData(wsLiv)
                 Set matchRows = FindAllRowsBySTR(livArr, CStr(strKey))
-                Set desiredSprints = GetSprintsForSTR(crArr, CStr(strKey))
+                Set desiredSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap, sprintMap)
                 maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, desiredSprints, sprintMap)
                 If maxSprintKey <> "" And sprintMap.Exists("3") Then
                     Set ycol = sprintMap("3")
@@ -534,7 +554,7 @@ NextCrRow:
                 If maxSprintKey <> "" And NormalizeSprintKey(dv) = maxSprintKey Then
                     For colI2 = COL_U To COL_X
                         If uvrColMap.Exists(colI2) Then
-                            wsLiv.Cells(rr, colI2).Value = ComputeUVRCell(bv, cv, ev, uvrArr, CLng(uvrColMap(colI2)))
+                            wsLiv.Cells(rr, colI2).Value = ComputeUVRCell(bv, cv, ev, uvrArr, CLng(uvrColMap(colI2)), colI2)
                         End If
                     Next colI2
                 End If
@@ -548,17 +568,17 @@ NextCrRow:
     ' Rebuild borders and persist new snapshot state.
     RebuildSuiviLivrablesBorders wsLiv, wsTmp, sprintMap, lastBorderCol
 
-    Application.StatusBar = "Suivi Update: Saving snapshot..."
+    Application.StatusBar = "Mise a jour Suivi : enregistrement du snapshot..."
     jsonSnapshot = SerializeSnapshotToJson(crArr)
     WriteTextFile statusPath, jsonSnapshot
 
-    msg = "Update completed successfully." & vbCrLf & vbCrLf & _
-          "Changes detected in Suivi_CR:" & vbCrLf & _
-          "  - " & newSTRs.Count & " new CR row(s)" & vbCrLf & _
-          "Actions on Suivi_Livrables:" & vbCrLf & _
-          "  - " & insertedCount & " new STR block(s) inserted (" & totalInsertedRows & " rows)" & vbCrLf & _
-          "  - " & updatedCount & " existing STR(s) recomputed"
-    MsgBox msg, vbInformation, "Suivi Update"
+    msg = "Mise a jour terminee avec succes." & vbCrLf & vbCrLf & _
+          "Changements detectes dans Suivi_CR :" & vbCrLf & _
+          "  - " & newSTRs.Count & " nouvelle(s) ligne(s) CR" & vbCrLf & _
+          "Actions sur Suivi_Livrables :" & vbCrLf & _
+          "  - " & insertedCount & " nouveau(x) bloc(s) STR insere(s) (" & totalInsertedRows & " lignes)" & vbCrLf & _
+          "  - " & updatedCount & " STR existant(s) recalcule(s)"
+    MsgBox msg, vbInformation, "Mise a jour Suivi"
     GoTo Cleanup
 
 ErrHandler:
@@ -575,16 +595,18 @@ ErrHandler:
         " | src=" & errSource & _
         " | " & errMessage
 
-    MsgBox "Update failed: " & errMessage & _
-           " (Error " & errNumber & ")", vbCritical, "Suivi Update"
+    MsgBox "Echec de la mise a jour : " & errMessage & _
+           " (Erreur " & errNumber & ")", vbCritical, "Mise a jour Suivi"
     Resume Cleanup
 
 Cleanup:
     ' Always release lock and restore application settings.
     On Error Resume Next
     If lockCreated Then
-        wsCR.Unprotect Password:="suivi_update"
-        wsCR.Range("I1").ClearContents
+        If Left$(CStr(wsCR.Range("I1").Value & ""), Len("LOCKED by: " & Environ$("USERNAME"))) = "LOCKED by: " & Environ$("USERNAME") Then
+            wsCR.Unprotect Password:="suivi_update"
+            wsCR.Range("I1").ClearContents
+        End If
     End If
     Application.StatusBar = False
     Application.ScreenUpdating = True

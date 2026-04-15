@@ -7,7 +7,7 @@
                   label="Mise à jour"
                   screentip="Lancer la mise à jour du Suivi Livrables à partir du Suivi CR"
                   onAction="Ribbon_UpdateSuivi"/>
-          <button id="BtnArchive" imageMso="FileSaveAs" size="large"
+          <button id="BtnArchive" imageMso="Clear" size="large"
                   label="Archiver"
                   screentip="Archiver les données du Suivi Livrables"
                   onAction="Ribbon_ArchiveSuivi"/>
@@ -21,6 +21,12 @@
                   label="PowQ UVR"
                   screentip="Mettre à jour le Suivi UVR depuis PowQ (en cours de développement)"
                   onAction="Ribbon_PowQUVR"/>
+        </group>
+        <group id="DossierSafetyGroup" label="Dossier Safety">
+          <button id="BtnAddBNSuivi" imageMso="TableInsertRowsAbove" size="large"
+                  label="Ajouter BN_Suivi"
+                  screentip="Ajouter BN_Suivi"
+                  onAction="Ribbon_AddBNSuivi"/>
         </group>
       </tab>
     </tabs>
