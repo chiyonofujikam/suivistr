@@ -115,6 +115,7 @@ Public Sub ApplySuiviLivrablesColumnFormats(wsLiv As Worksheet)
     Dim lastRow As Long
     Dim r As Range
     Dim dataRng As Range
+    Dim colARng As Range
 
     lastRow = wsLiv.Cells(wsLiv.Rows.Count, COL_B).End(xlUp).Row
     If lastRow < LIV_FIRST_ROW Then Exit Sub
@@ -122,6 +123,9 @@ Public Sub ApplySuiviLivrablesColumnFormats(wsLiv As Worksheet)
     Set dataRng = wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, COL_A), wsLiv.Cells(lastRow, COL_Y))
     dataRng.Font.Name = "Aptos Narrow"
     dataRng.Font.Size = 14
+    Set colARng = wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, COL_A), wsLiv.Cells(lastRow, COL_A))
+    colARng.Font.Size = 10
+    colARng.Font.Color = RGB(217, 217, 217)
 
     ' Text columns.
     Set r = wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, COL_B), wsLiv.Cells(lastRow, COL_B)): r.NumberFormat = "@"

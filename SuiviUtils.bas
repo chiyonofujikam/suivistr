@@ -666,13 +666,15 @@ Public Function CheckAndOfferUpdateVHSTMaxSprints(wsVHST As Worksheet, crArr As 
     Dim msg As String
     Dim resp As VbMsgBoxResult
     Dim oneUpdate As Object
+    Dim isMissingInVHST As Boolean
 
     Set actualMap = BuildActualMaxSprintMapCR(crArr)
     Set vhstMap = BuildMaxSprintMapVHST(vhstArr)
 
     For Each k In actualMap.Keys
         a = CDbl(actualMap(k))
-        If vhstMap.Exists(k) Then
+        isMissingInVHST = Not vhstMap.Exists(k)
+        If Not isMissingInVHST Then
             If IsNumeric(vhstMap(k)) Then
                 v = CDbl(vhstMap(k))
             Else
@@ -683,13 +685,20 @@ Public Function CheckAndOfferUpdateVHSTMaxSprints(wsVHST As Worksheet, crArr As 
         End If
 
         If a > v Then
-            msg = "La STR suivante a un sprint dans Suivi_CR superieur a " & SH_VHST & " :" & vbCrLf & vbCrLf & _
-                  "STR : " & CStr(k) & vbCrLf & _
-                  SH_VHST & " (Max_Sprint) : " & CStr(CLng(v)) & vbCrLf & _
-                  "Suivi_CR (Sprint max) : " & CStr(CLng(a)) & vbCrLf & vbCrLf & _
-                  "Voulez-vous mettre a jour " & SH_VHST & " pour cette STR ?"
+            If isMissingInVHST Then
+                msg = "La STR suivante existe dans Suivi_CR mais est absente de " & SH_VHST & " :" & vbCrLf & vbCrLf & _
+                      "STR : " & CStr(k) & vbCrLf & _
+                      "Suivi_CR (Sprint max) : " & CStr(CLng(a)) & vbCrLf & vbCrLf & _
+                      "Voulez-vous l'ajouter dans " & SH_VHST & " avec ce sprint max ?"
+            Else
+                msg = "La STR suivante a un sprint dans Suivi_CR superieur a " & SH_VHST & " :" & vbCrLf & vbCrLf & _
+                      "STR : " & CStr(k) & vbCrLf & _
+                      SH_VHST & " (Max_Sprint) : " & CStr(CLng(v)) & vbCrLf & _
+                      "Suivi_CR (Sprint max) : " & CStr(CLng(a)) & vbCrLf & vbCrLf & _
+                      "Voulez-vous mettre a jour " & SH_VHST & " pour cette STR ?"
+            End If
 
-            resp = MsgBox(msg, vbYesNoCancel + vbExclamation, "Incoherence Max Sprint")
+            resp = MsgBox(msg, vbYesNoCancel + vbExclamation, "Synchronisation " & SH_VHST)
             If resp = vbYes Then
                 Set oneUpdate = CreateObject("Scripting.Dictionary")
                 oneUpdate(CStr(k)) = CStr(CLng(a))
@@ -710,6 +719,7 @@ Private Sub ApplyVHSTMaxSprintUpdates(wsVHST As Worksheet, updates As Object)
     Dim k As String
     Dim found As Boolean
     Dim u As Variant
+    Dim targetRow As Long
 
     lastRow = wsVHST.Cells(wsVHST.Rows.Count, 1).End(xlUp).Row
     If lastRow < 2 Then lastRow = 1
@@ -727,9 +737,21 @@ Private Sub ApplyVHSTMaxSprintUpdates(wsVHST As Worksheet, updates As Object)
         Next r
 
         If Not found Then
-            lastRow = lastRow + 1
-            wsVHST.Cells(lastRow, 1).Value = u
-            wsVHST.Cells(lastRow, 2).Value = updates(u)
+            targetRow = 0
+            For r = 2 To lastRow
+                If Trim$(CStr(wsVHST.Cells(r, 1).Value & "")) = "" Then
+                    targetRow = r
+                    Exit For
+                End If
+            Next r
+
+            If targetRow = 0 Then
+                lastRow = lastRow + 1
+                targetRow = lastRow
+            End If
+
+            wsVHST.Cells(targetRow, 1).Value = u
+            wsVHST.Cells(targetRow, 2).Value = updates(u)
         End If
     Next u
 End Sub
