@@ -36,3 +36,22 @@ Public Const COL_V As Long = 22
 Public Const COL_W As Long = 23
 Public Const COL_X As Long = 24
 Public Const COL_Y As Long = 25
+
+' Dynamic block generation settings.
+Public Const SECTION_ADL1 As String = "ADL1"
+Public Const SECTION_SWDS As String = "SWDS"
+
+' Placeholder colors (BGR hex in VBA Long). Adjust values as needed.
+Public Const COLOR_B_BASE_ADL1 As Long = &H00FBEDCA
+Public Const COLOR_B_BASE_SWDS As Long = &H00D0F2DA
+Public Const COLOR_C_ADL1 As Long = &H00F3CB61
+Public Const COLOR_C_SWDS As Long = &H0073D98E
+Public Const COLOR_BASE_SPRINT As Long = &H00D5E2FB
+Public Const COLOR_YELLOW_ZONE As Long = &H00AFECFF
+Public Const COLOR_UX_DEFAULT As Long = &H00BFBFBF
+Public Const COLOR_METRIC_BG As Long = &H00D9D9D9
+Public Const COLOR_BORDER_LIGHT As Long = &H00969696
+Public Const COLOR_BORDER_HARD As Long = &H00000000
+
+' Darkening step (0-1): each sprint increases darkness.
+Public Const SPRINT_DARKEN_STEP As Double = 0.08

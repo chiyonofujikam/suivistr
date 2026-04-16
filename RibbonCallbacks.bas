@@ -7,7 +7,7 @@ End Sub
 
 ' Ribbon callback for archive button.
 Public Sub Ribbon_ArchiveSuivi(ByVal control As Object)
-    RunMacroSafe "Archivage", "ArchiveSuiviLivrable"
+    RunMacroSafe "Archivage", "ArchiveSuiviLivrable", "ArchiveSuiviLivrable.ArchiveSuiviLivrable"
 End Sub
 
 ' Ribbon callback for PowQ extract button.

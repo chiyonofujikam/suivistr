@@ -31,14 +31,10 @@ Public Sub UpdateSuiviLivrable()
     Dim oldCells As Object
     Dim entry As Object
     Dim wsLiv As Worksheet
-    Dim wsTmp As Worksheet
     Dim insertRow As Long
-    Dim firstNewRow As Long
     Dim iterItem As Variant
     Dim bv As String, cv As String, dv As String, ev As String
     Dim rr As Long
-    Dim blockEnd As Long
-    Dim blockStartRow As Long
     Dim insertedCount As Long
     Dim updatedCount As Long
     Dim totalInsertedRows As Long
@@ -48,39 +44,13 @@ Public Sub UpdateSuiviLivrable()
     Dim strKey As Variant
     Dim matchRows As Collection
     Dim matchItem As Variant
-    Dim lastTmpCol As Long
-    Dim sprintMap As Object
+    Dim lastLivCol As Long
     Dim blockInfo As Object
     Dim strSprints As Collection
     Dim maxSprintKey As String
-    Dim rangesCol As Collection
-    Dim tmplPair As Variant
-    Dim tmplStart As Long
-    Dim tmplEnd As Long
     Dim nrows As Long
-    Dim sp As Variant
-    Dim segIdx As Long
-    Dim yp As Variant
-    Dim ycol As Collection
     Dim br As Variant
-    Dim adl1Start As Long
-    Dim swdsStart As Long
-    Dim yellowRanges As Collection
-    Dim yr As Variant
     Dim colI2 As Long
-    Dim desiredSprints As Collection
-    Dim existingSprints As Object
-    Dim missingSprints As Collection
-    Dim desiredSprintSet As Object
-    Dim extraSprints As Object
-    Dim delCount As Long
-    Dim minRow As Long, maxRow As Long
-    Dim swdsMarker As String
-    Dim swdsStartRow As Long
-    Dim spKey As Variant
-    Dim insRow As Long
-    Dim segRows As Long
-    Dim pair As Variant
     Dim lastBorderCol As Long
     Dim msg As String
     Dim errNumber As Long
@@ -89,6 +59,8 @@ Public Sub UpdateSuiviLivrable()
     Dim rowKey As String
     Dim vhstSTRMap As Object
     Dim vhstKey As Variant
+    Dim fonctions As Collection
+    Dim minRow As Long
 
     On Error GoTo ErrHandler
     lockCreated = False
@@ -194,11 +166,10 @@ NextCrRow:
     Next r
 
     Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
-    Set wsTmp = ThisWorkbook.Sheets(SH_TMP)
     livArr = LoadSheetData(wsLiv)
-    lastTmpCol = wsTmp.UsedRange.Column + wsTmp.UsedRange.Columns.Count - 1
-    Set sprintMap = BuildSprintRangeMap(wsTmp)
-    lastBorderCol = lastTmpCol
+    lastLivCol = wsLiv.UsedRange.Column + wsLiv.UsedRange.Columns.Count - 1
+    If lastLivCol < 1 Then lastLivCol = COL_Y
+    lastBorderCol = lastLivCol
     If lastBorderCol < COL_Y Then lastBorderCol = COL_Y
 
     Set uniqueSTRs = CreateObject("Scripting.Dictionary")
@@ -223,18 +194,7 @@ NextCrRow:
         End If
     Next strKey
 
-    Set vhstSTRMap = CreateObject("Scripting.Dictionary")
-    vhstSTRMap.CompareMode = vbTextCompare
-    If Not IsEmpty(vhstArr) Then
-        If UBound(vhstArr, 1) >= 2 Then
-            For rr = 2 To UBound(vhstArr, 1)
-                vhstKey = Trim$(CStr(vhstArr(rr, COL_A) & ""))
-                If CStr(vhstKey) <> "" Then
-                    If Not vhstSTRMap.Exists(CStr(vhstKey)) Then vhstSTRMap(CStr(vhstKey)) = True
-                End If
-            Next rr
-        End If
-    End If
+    Set vhstSTRMap = BuildSTRMapVHST(vhstArr)
     For Each vhstKey In vhstSTRMap.Keys
         If FindRowBySTR(livArr, CStr(vhstKey)) = 0 Then
             strsToInsert(CStr(vhstKey)) = True
@@ -250,82 +210,32 @@ NextCrRow:
 
     insertedCount = 0
     totalInsertedRows = 0
-    Set yellowRanges = New Collection
     Set uvrColMap = BuildUVRColumnMap(wsLiv, uvrArr)
     Set maxSprintMap = BuildMaxSprintMapVHST(vhstArr)
+    Set fonctions = BuildFonctionsFromVHST(vhstArr)
+    If fonctions.Count = 0 Then
+        Err.Raise vbObjectError + 2001, "UpdateSuiviLivrable", _
+                  "Aucune fonction disponible dans " & SH_VHST & " (colonne F)."
+    End If
 
-    ' Insert missing STR blocks from template when needed.
+    ' Insert new STR blocks from generated structure.
     If strsToInsert.Count > 0 Then
         Application.StatusBar = "Mise a jour Suivi : insertion de " & strsToInsert.Count & " bloc(s) STR..."
 
         Set blockInfo = CreateObject("Scripting.Dictionary")
 
-        firstNewRow = GetLastDataRow(wsLiv, COL_B) + 1
-        If firstNewRow < LIV_FIRST_ROW Then firstNewRow = LIV_FIRST_ROW
-        insertRow = firstNewRow
-
         For Each strKey In strsToInsert.Keys
-            Set strSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap, sprintMap)
-            maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, strSprints, sprintMap)
-
-            blockStartRow = insertRow
-
-            For segIdx = 1 To 2
-                If segIdx = 1 Then adl1Start = insertRow
-                If segIdx = 2 Then swdsStart = insertRow
-
-                For Each sp In strSprints
-                    If sprintMap.Exists(CStr(sp)) Then
-                        Set rangesCol = sprintMap(CStr(sp))
-                        If segIdx <= rangesCol.Count Then
-                            tmplPair = rangesCol(segIdx)
-                            tmplStart = tmplPair(0)
-                            tmplEnd = tmplPair(1)
-                            nrows = tmplEnd - tmplStart + 1
-
-                            wsTmp.Range(wsTmp.Cells(tmplStart, 1), wsTmp.Cells(tmplEnd, lastTmpCol)).Copy
-                            wsLiv.Cells(insertRow, 1).PasteSpecial Paste:=xlPasteFormats
-                            Application.CutCopyMode = False
-
-                            wsTmp.Range(wsTmp.Cells(tmplStart, COL_C), wsTmp.Cells(tmplEnd, COL_E)).Copy
-                            wsLiv.Cells(insertRow, COL_C).PasteSpecial Paste:=xlPasteValues
-                            Application.CutCopyMode = False
-
-                            For rr = insertRow To insertRow + nrows - 1
-                                wsLiv.Cells(rr, COL_B).Value = CStr(strKey)
-                            Next rr
-
-                            If maxSprintKey <> "" And CStr(sp) = maxSprintKey And sprintMap.Exists("3") Then
-                                Set ycol = sprintMap("3")
-                                If segIdx <= ycol.Count Then
-                                    yp = ycol(segIdx)
-                                    ApplyYellowSectionUtoX wsLiv, insertRow, insertRow + nrows - 1, wsTmp, yp(0), yp(1)
-                                    yellowRanges.Add Array(insertRow, insertRow + nrows - 1)
-                                End If
-                            End If
-
-                            insertRow = insertRow + nrows
-                            totalInsertedRows = totalInsertedRows + nrows
-                        End If
-                    End If
-                Next sp
-
-                If segIdx = 1 Then
-                    If insertRow > adl1Start Then
-                        ApplyLightOutlineBorder wsLiv, adl1Start, insertRow - 1, lastBorderCol
-                    End If
-                Else
-                    If insertRow > swdsStart Then
-                        ApplyLightOutlineBorder wsLiv, swdsStart, insertRow - 1, lastBorderCol
-                    End If
-                End If
-            Next segIdx
-
-            If insertRow > blockStartRow Then
-                blockEnd = insertRow - 1
-                ApplyHardOutlineBorder wsLiv, blockStartRow, blockEnd, lastBorderCol
-                blockInfo.Add CStr(strKey), Array(blockStartRow, blockEnd)
+            Set strSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap)
+            maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, strSprints)
+            nrows = GeneratedBlockRowCount(strSprints, fonctions)
+            If nrows > 0 Then
+                insertRow = GetLastDataRow(wsLiv, COL_B) + 1
+                If insertRow < LIV_FIRST_ROW Then insertRow = LIV_FIRST_ROW
+                wsLiv.Rows(insertRow & ":" & (insertRow + nrows - 1)).Insert Shift:=xlDown
+                br = InsertGeneratedSTRBlock(wsLiv, insertRow, CStr(strKey), strSprints, fonctions, lastBorderCol, maxSprintKey)
+                blockInfo(CStr(strKey)) = br
                 insertedCount = insertedCount + 1
+                totalInsertedRows = totalInsertedRows + nrows
             End If
         Next strKey
 
@@ -333,6 +243,8 @@ NextCrRow:
 
         For Each strKey In strsToInsert.Keys
             If blockInfo.Exists(CStr(strKey)) Then
+                Set strSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap)
+                maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, strSprints)
                 br = blockInfo(CStr(strKey))
                 For rr = br(0) To br(1)
                     bv = CStr(livArr(rr, COL_B) & "")
@@ -350,192 +262,50 @@ NextCrRow:
                     wsLiv.Cells(rr, COL_O).Value = ComputeColO(bv, cv, dv, ev, powqArr)
                     wsLiv.Cells(rr, COL_T).Value = ComputeColT(bv, cv, dv, ev, powqArr)
                     wsLiv.Cells(rr, COL_A).Value = ComputeColA(bv, cv, dv, ev)
+
+                    If maxSprintKey <> "" And NormalizeSprintKey(dv) = maxSprintKey Then
+                        For colI2 = COL_U To COL_X
+                            If uvrColMap.Exists(colI2) Then
+                                wsLiv.Cells(rr, colI2).Value = ComputeUVRCell(bv, cv, ev, uvrArr, CLng(uvrColMap(colI2)), colI2)
+                            End If
+                        Next colI2
+                    End If
                 Next rr
             End If
         Next strKey
-
-        For Each yr In yellowRanges
-            WriteYellowValuesUtoX wsLiv, yr(0), yr(1), uvrArr, uvrColMap, livArr
-        Next yr
     End If
 
     updatedCount = 0
 
-    ' Recompute existing STR blocks and synchronize sprints.
+    ' Rebuild changed STR blocks from generated structure.
     If strsToUpdate.Count > 0 Then
         Application.StatusBar = "Mise a jour Suivi : recalcul de " & strsToUpdate.Count & " STR..."
 
         For Each strKey In strsToUpdate.Keys
+            livArr = LoadSheetData(wsLiv)
             Set matchRows = FindAllRowsBySTR(livArr, CStr(strKey))
+            If matchRows.Count = 0 Then GoTo NextUpdateStr
 
-            Set desiredSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap, sprintMap)
-            maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, desiredSprints, sprintMap)
-            Set existingSprints = CreateObject("Scripting.Dictionary")
-            Set desiredSprintSet = CreateObject("Scripting.Dictionary")
-            Set extraSprints = CreateObject("Scripting.Dictionary")
-            minRow = 0: maxRow = 0
-            For Each spKey In desiredSprints
-                desiredSprintSet(CStr(spKey)) = True
-            Next spKey
+            minRow = CLng(matchRows(1))
             For Each matchItem In matchRows
                 rr = CLng(matchItem)
-                If minRow = 0 Or rr < minRow Then minRow = rr
-                If maxRow = 0 Or rr > maxRow Then maxRow = rr
-                spKey = NormalizeSprintKey(livArr(rr, COL_D))
-                If spKey <> "" Then existingSprints(CStr(spKey)) = True
+                If rr < minRow Then minRow = rr
             Next matchItem
 
-            If minRow > 0 Then
-                For Each spKey In existingSprints.Keys
-                    If Not desiredSprintSet.Exists(CStr(spKey)) Then
-                        If sprintMap.Exists(CStr(spKey)) Then extraSprints(CStr(spKey)) = True
-                    End If
-                Next spKey
+            For rr = matchRows.Count To 1 Step -1
+                wsLiv.Rows(CLng(matchRows(rr))).Delete
+            Next rr
 
-                If extraSprints.Count > 0 Then
-                    delCount = 0
-                    For rr = maxRow To minRow Step -1
-                        spKey = NormalizeSprintKey(wsLiv.Cells(rr, COL_D).Value)
-                        If spKey <> "" Then
-                            If extraSprints.Exists(CStr(spKey)) Then
-                                wsLiv.Rows(rr).Delete
-                                delCount = delCount + 1
-                            End If
-                        End If
-                    Next rr
+            Set strSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap)
+            maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, strSprints)
+            nrows = GeneratedBlockRowCount(strSprints, fonctions)
+            If nrows <= 0 Then GoTo NextUpdateStr
 
-                    If delCount > 0 Then
-                        livArr = LoadSheetData(wsLiv)
-                        Set matchRows = FindAllRowsBySTR(livArr, CStr(strKey))
-                        Set existingSprints = CreateObject("Scripting.Dictionary")
-                        minRow = 0: maxRow = 0
-                        For Each matchItem In matchRows
-                            rr = CLng(matchItem)
-                            If minRow = 0 Or rr < minRow Then minRow = rr
-                            If maxRow = 0 Or rr > maxRow Then maxRow = rr
-                            spKey = NormalizeSprintKey(livArr(rr, COL_D))
-                            If spKey <> "" Then existingSprints(CStr(spKey)) = True
-                        Next matchItem
-                    End If
-                End If
-            End If
+            wsLiv.Rows(minRow & ":" & (minRow + nrows - 1)).Insert Shift:=xlDown
+            br = InsertGeneratedSTRBlock(wsLiv, minRow, CStr(strKey), strSprints, fonctions, lastBorderCol, maxSprintKey)
 
-            Set missingSprints = New Collection
-            For Each spKey In desiredSprints
-                If Not existingSprints.Exists(CStr(spKey)) Then
-                    If sprintMap.Exists(CStr(spKey)) Then missingSprints.Add CStr(spKey)
-                End If
-            Next spKey
-
-            If missingSprints.Count > 0 And minRow > 0 Then
-                swdsMarker = ""
-                For Each spKey In desiredSprints
-                    If sprintMap.Exists(CStr(spKey)) Then
-                        Set rangesCol = sprintMap(CStr(spKey))
-                        If rangesCol.Count >= 2 Then
-                            pair = rangesCol(2)
-                            swdsMarker = CStr(wsTmp.Cells(CLng(pair(0)), COL_C).Value & "")
-                            Exit For
-                        End If
-                    End If
-                Next spKey
-
-                swdsStartRow = 0
-                If swdsMarker <> "" Then
-                    For rr = minRow To maxRow
-                        If CStr(wsLiv.Cells(rr, COL_C).Value & "") = swdsMarker Then
-                            swdsStartRow = rr
-                            Exit For
-                        End If
-                    Next rr
-                End If
-                If swdsStartRow = 0 Then swdsStartRow = maxRow + 1
-
-                wsLiv.Range(wsLiv.Cells(minRow, COL_U), wsLiv.Cells(maxRow, COL_X)).Interior.ColorIndex = xlNone
-
-                insRow = swdsStartRow
-                For Each spKey In missingSprints
-                    Set rangesCol = sprintMap(CStr(spKey))
-                    pair = rangesCol(1)
-                    segRows = CLng(pair(1)) - CLng(pair(0)) + 1
-                    wsLiv.Rows(insRow & ":" & (insRow + segRows - 1)).Insert Shift:=xlDown
-
-                    wsTmp.Range(wsTmp.Cells(CLng(pair(0)), 1), wsTmp.Cells(CLng(pair(1)), lastTmpCol)).Copy
-                    wsLiv.Cells(insRow, 1).PasteSpecial Paste:=xlPasteFormats
-                    Application.CutCopyMode = False
-
-                    wsTmp.Range(wsTmp.Cells(CLng(pair(0)), COL_C), wsTmp.Cells(CLng(pair(1)), COL_E)).Copy
-                    wsLiv.Cells(insRow, COL_C).PasteSpecial Paste:=xlPasteValues
-                    Application.CutCopyMode = False
-
-                    For rr = insRow To insRow + segRows - 1
-                        wsLiv.Cells(rr, COL_B).Value = CStr(strKey)
-                    Next rr
-
-                    insRow = insRow + segRows
-                    maxRow = maxRow + segRows
-                Next spKey
-
-                insRow = maxRow + 1
-                For Each spKey In missingSprints
-                    Set rangesCol = sprintMap(CStr(spKey))
-                    pair = rangesCol(2)
-                    segRows = CLng(pair(1)) - CLng(pair(0)) + 1
-                    wsLiv.Rows(insRow & ":" & (insRow + segRows - 1)).Insert Shift:=xlDown
-
-                    wsTmp.Range(wsTmp.Cells(CLng(pair(0)), 1), wsTmp.Cells(CLng(pair(1)), lastTmpCol)).Copy
-                    wsLiv.Cells(insRow, 1).PasteSpecial Paste:=xlPasteFormats
-                    Application.CutCopyMode = False
-
-                    wsTmp.Range(wsTmp.Cells(CLng(pair(0)), COL_C), wsTmp.Cells(CLng(pair(1)), COL_E)).Copy
-                    wsLiv.Cells(insRow, COL_C).PasteSpecial Paste:=xlPasteValues
-                    Application.CutCopyMode = False
-
-                    For rr = insRow To insRow + segRows - 1
-                        wsLiv.Cells(rr, COL_B).Value = CStr(strKey)
-                    Next rr
-
-                    insRow = insRow + segRows
-                    maxRow = maxRow + segRows
-                Next spKey
-
-                swdsStartRow = 0
-                If swdsMarker <> "" Then
-                    For rr = minRow To maxRow
-                        If CStr(wsLiv.Cells(rr, COL_C).Value & "") = swdsMarker Then
-                            swdsStartRow = rr
-                            Exit For
-                        End If
-                    Next rr
-                End If
-                If swdsStartRow = 0 Then swdsStartRow = maxRow + 1
-                If swdsStartRow > minRow Then ApplyLightOutlineBorder wsLiv, minRow, swdsStartRow - 1, lastBorderCol
-                If swdsStartRow <= maxRow Then ApplyLightOutlineBorder wsLiv, swdsStartRow, maxRow, lastBorderCol
-                ApplyHardOutlineBorder wsLiv, minRow, maxRow, lastBorderCol
-
-                livArr = LoadSheetData(wsLiv)
-                Set matchRows = FindAllRowsBySTR(livArr, CStr(strKey))
-                Set desiredSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap, sprintMap)
-                maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, desiredSprints, sprintMap)
-                If maxSprintKey <> "" And sprintMap.Exists("3") Then
-                    Set ycol = sprintMap("3")
-                    For segIdx = 1 To 2
-                        If segIdx <= ycol.Count Then
-                            yp = ycol(segIdx)
-                            For Each matchItem In matchRows
-                                rr = CLng(matchItem)
-                                If NormalizeSprintKey(livArr(rr, COL_D)) = maxSprintKey Then
-                                    ApplyYellowSectionUtoX wsLiv, rr, rr, wsTmp, CLng(yp(0)), CLng(yp(0))
-                                End If
-                            Next matchItem
-                        End If
-                    Next segIdx
-                End If
-            End If
-
-            For Each matchItem In matchRows
-                rr = CLng(matchItem)
-
+            livArr = LoadSheetData(wsLiv)
+            For rr = br(0) To br(1)
                 bv = CStr(livArr(rr, COL_B) & "")
                 cv = CStr(livArr(rr, COL_C) & "")
                 dv = CStr(livArr(rr, COL_D) & "")
@@ -560,13 +330,15 @@ NextCrRow:
                 End If
 
                 wsLiv.Cells(rr, COL_A).Value = ComputeColA(bv, cv, dv, ev)
-            Next matchItem
+            Next rr
+NextUpdateStr:
             updatedCount = updatedCount + 1
         Next strKey
     End If
 
     ' Rebuild borders and persist new snapshot state.
-    RebuildSuiviLivrablesBorders wsLiv, wsTmp, sprintMap, lastBorderCol
+    RebuildSuiviLivrablesBorders wsLiv, lastBorderCol
+    ApplySuiviLivrablesColumnFormats wsLiv
 
     Application.StatusBar = "Mise a jour Suivi : enregistrement du snapshot..."
     jsonSnapshot = SerializeSnapshotToJson(crArr)

@@ -1,7 +1,6 @@
 Option Explicit
 
 Private m_SharedFolder As String
-Private m_ArchiveRunning As Boolean
 
 #If VBA7 Then
     Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As LongPtr)
@@ -45,7 +44,7 @@ Public Sub ValidateRequiredSheets()
     Dim found As Boolean
     Dim sheetList As String
 
-    names = Array(SH_CR, SH_LIV, SH_EXTRACT, SH_TMP)
+    names = Array(SH_CR, SH_LIV, SH_EXTRACT, SH_VHST)
     missing = ""
 
     For i = LBound(names) To UBound(names)
@@ -340,7 +339,6 @@ Public Function SerializeSnapshotToJson(crArr As Variant) As String
         coll.Add rowDict
 NextSnapRow:
     Next r
-
     SerializeSnapshotToJson = JsonConverter.ConvertToJson(coll, Whitespace:=2)
 End Function
 
@@ -517,49 +515,21 @@ End Function
 
 ' Returns target sprint keys for an STR using VHST max sprint when available.
 Public Function GetTargetSprintsForSTR(crArr As Variant, strVal As String, _
-                                       maxSprintMap As Object, sprintMap As Object) As Collection
-    Dim result As New Collection
+                                       maxSprintMap As Object) As Collection
     Dim maxSprint As String
-    Dim maxVal As Double
-    Dim key As Variant
-    Dim arr() As String
-    Dim n As Long
+    Dim maxVal As Long
     Dim i As Long
-    Dim j As Long
-    Dim tmp As String
+    Dim result As New Collection
 
     If Not maxSprintMap Is Nothing Then
         If maxSprintMap.Exists(Trim$(CStr(strVal & ""))) Then
             maxSprint = NormalizeSprintKey(maxSprintMap(Trim$(CStr(strVal & ""))))
             If IsNumeric(maxSprint) Then
-                maxVal = CDbl(maxSprint)
-
-                If Not sprintMap Is Nothing Then
-                    ReDim arr(0 To sprintMap.Count - 1)
-                    n = 0
-                    For Each key In sprintMap.Keys
-                        arr(n) = CStr(key)
-                        n = n + 1
-                    Next key
-
-                    For i = LBound(arr) To UBound(arr) - 1
-                        For j = i + 1 To UBound(arr)
-                            If SprintSortKey(arr(j)) < SprintSortKey(arr(i)) Then
-                                tmp = arr(i): arr(i) = arr(j): arr(j) = tmp
-                            End If
-                        Next j
+                maxVal = CLng(CDbl(maxSprint))
+                If maxVal > 0 Then
+                    For i = 1 To maxVal
+                        result.Add CStr(i)
                     Next i
-
-                    For i = LBound(arr) To UBound(arr)
-                        If IsNumeric(arr(i)) Then
-                            If CDbl(arr(i)) <= maxVal Then
-                                result.Add arr(i)
-                            End If
-                        End If
-                    Next i
-                End If
-
-                If result.Count > 0 Then
                     Set GetTargetSprintsForSTR = result
                     Exit Function
                 End If
@@ -628,48 +598,33 @@ Public Function BuildSTRMapVHST(vhstArr As Variant) As Object
     Set BuildSTRMapVHST = dict
 End Function
 
-' Checks whether a collection contains a value.
-Private Function CollectionContains(col As Collection, ByVal value As String) As Boolean
-    Dim v As Variant
-    For Each v In col
-        If CStr(v) = value Then
-            CollectionContains = True
-            Exit Function
-        End If
-    Next v
-    CollectionContains = False
-End Function
+' Builds unique global Fonction list from VHST sheet (column F).
+Public Function BuildFonctionsFromVHST(vhstArr As Variant) As Collection
+    Dim result As New Collection
+    Dim seen As Object
+    Dim r As Long
+    Dim fn As String
 
-' Resolves sprint to highlight in yellow for an STR block.
-Public Function GetYellowSprintKeyForSTR(strKey As String, maxSprintMap As Object, _
-                                        strSprints As Collection, sprintMap As Object) As String
-    Dim candidate As String
-    Dim k As String
-    Dim i As Long
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = vbTextCompare
 
-    GetYellowSprintKeyForSTR = ""
-    k = Trim$(CStr(strKey & ""))
-
-    If Not maxSprintMap Is Nothing Then
-        If maxSprintMap.Exists(k) Then
-            candidate = CStr(maxSprintMap(k))
-            If candidate <> "" Then
-                If CollectionContains(strSprints, candidate) And sprintMap.Exists(candidate) Then
-                    GetYellowSprintKeyForSTR = candidate
-                    Exit Function
+    If Not IsEmpty(vhstArr) Then
+        If UBound(vhstArr, 1) >= 2 And UBound(vhstArr, 2) >= COL_F Then
+            For r = 2 To UBound(vhstArr, 1)
+                fn = Trim$(CStr(vhstArr(r, COL_F) & ""))
+                If fn <> "" Then
+                    If Not seen.Exists(fn) Then
+                        seen(fn) = True
+                        result.Add fn
+                    End If
                 End If
-            End If
+            Next r
         End If
     End If
 
-    For i = strSprints.Count To 1 Step -1
-        candidate = CStr(strSprints(i))
-        If sprintMap.Exists(candidate) Then
-            GetYellowSprintKeyForSTR = candidate
-            Exit Function
-        End If
-    Next i
+    Set BuildFonctionsFromVHST = result
 End Function
+
 
 ' Builds actual max sprint map from CR data.
 Public Function BuildActualMaxSprintMapCR(crArr As Variant) As Object
@@ -826,19 +781,6 @@ Private Sub SprintMapAddRange(map As Object, key As String, startR As Long, endR
     col.Add Array(startR, endR)
 End Sub
 
-' Copies U:X yellow formatting from template to target rows.
-Public Sub ApplyYellowSectionUtoX(wsLiv As Worksheet, ByVal destStart As Long, ByVal destEnd As Long, _
-                                 wsTmp As Worksheet, ByVal srcStart As Long, ByVal srcEnd As Long)
-    Dim i As Long
-    Dim n As Long
-    n = destEnd - destStart + 1
-    If srcEnd - srcStart + 1 <> n Then Exit Sub
-    For i = 0 To n - 1
-        wsLiv.Range(wsLiv.Cells(destStart + i, COL_U), wsLiv.Cells(destStart + i, COL_X)).Interior.Color = _
-            wsTmp.Range(wsTmp.Cells(srcStart + i, COL_U), wsTmp.Cells(srcStart + i, COL_X)).Interior.Color
-    Next i
-End Sub
-
 ' Maps Suivi U:X headers to UVR source columns.
 Public Function BuildUVRColumnMap(wsLiv As Worksheet, uvrArr As Variant) As Object
     Dim dict As Object
@@ -954,133 +896,6 @@ Public Sub WriteYellowValuesUtoX(wsLiv As Worksheet, ByVal destStart As Long, By
             End If
         Next colIdx
     Next rr
-End Sub
-
-' Draws thin gray border around a row block.
-Public Sub ApplyLightOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal bottomRow As Long, _
-                                  ByVal lastCol As Long)
-    Dim rng As Range
-    If topRow > bottomRow Then Exit Sub
-    Set rng = ws.Range(ws.Cells(topRow, 1), ws.Cells(bottomRow, lastCol))
-    With rng.Borders(xlEdgeTop)
-        .LineStyle = xlContinuous
-        .Weight = xlThin
-        .Color = RGB(150, 150, 150)
-    End With
-    With rng.Borders(xlEdgeBottom)
-        .LineStyle = xlContinuous
-        .Weight = xlThin
-        .Color = RGB(150, 150, 150)
-    End With
-    With rng.Borders(xlEdgeLeft)
-        .LineStyle = xlContinuous
-        .Weight = xlThin
-        .Color = RGB(150, 150, 150)
-    End With
-    With rng.Borders(xlEdgeRight)
-        .LineStyle = xlContinuous
-        .Weight = xlThin
-        .Color = RGB(150, 150, 150)
-    End With
-End Sub
-
-' Draws medium black border around a row block.
-Public Sub ApplyHardOutlineBorder(ws As Worksheet, ByVal topRow As Long, ByVal bottomRow As Long, _
-                                  ByVal lastCol As Long)
-    Dim rng As Range
-    If topRow > bottomRow Then Exit Sub
-    Set rng = ws.Range(ws.Cells(topRow, 1), ws.Cells(bottomRow, lastCol))
-    With rng.Borders(xlEdgeTop)
-        .LineStyle = xlContinuous
-        .Weight = xlMedium
-        .Color = RGB(0, 0, 0)
-    End With
-    With rng.Borders(xlEdgeBottom)
-        .LineStyle = xlContinuous
-        .Weight = xlMedium
-        .Color = RGB(0, 0, 0)
-    End With
-    With rng.Borders(xlEdgeLeft)
-        .LineStyle = xlContinuous
-        .Weight = xlMedium
-        .Color = RGB(0, 0, 0)
-    End With
-    With rng.Borders(xlEdgeRight)
-        .LineStyle = xlContinuous
-        .Weight = xlMedium
-        .Color = RGB(0, 0, 0)
-    End With
-End Sub
-
-' Rebuilds block borders for all STR sections.
-Public Sub RebuildSuiviLivrablesBorders(wsLiv As Worksheet, wsTmp As Worksheet, sprintMap As Object, ByVal lastCol As Long)
-    Dim lastRow As Long
-    Dim r As Long
-    Dim blockStart As Long
-    Dim blockEnd As Long
-    Dim curStr As String
-    Dim nextStr As String
-    Dim swdsMarker As String
-    Dim swdsStartRow As Long
-    Dim k As Variant
-    Dim rangesCol As Collection
-    Dim pair As Variant
-
-    lastRow = wsLiv.Cells(wsLiv.Rows.Count, COL_B).End(xlUp).Row
-    If lastRow < LIV_FIRST_ROW Then Exit Sub
-
-    swdsMarker = ""
-    If Not sprintMap Is Nothing Then
-        For Each k In sprintMap.Keys
-            Set rangesCol = sprintMap(CStr(k))
-            If rangesCol.Count >= 2 Then
-                pair = rangesCol(2)
-                swdsMarker = CStr(wsTmp.Cells(CLng(pair(0)), COL_C).Value & "")
-                Exit For
-            End If
-        Next k
-    End If
-
-    With wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, 1), wsLiv.Cells(lastRow, lastCol)).Borders
-        .LineStyle = xlNone
-    End With
-
-    blockStart = LIV_FIRST_ROW
-    Do While blockStart <= lastRow
-        curStr = Trim$(CStr(wsLiv.Cells(blockStart, COL_B).Value & ""))
-        If curStr = "" Then
-            blockStart = blockStart + 1
-            GoTo NextBlock
-        End If
-
-        blockEnd = blockStart
-        Do While blockEnd < lastRow
-            nextStr = Trim$(CStr(wsLiv.Cells(blockEnd + 1, COL_B).Value & ""))
-            If nextStr <> curStr Then Exit Do
-            blockEnd = blockEnd + 1
-        Loop
-
-        swdsStartRow = blockEnd + 1
-        If swdsMarker <> "" Then
-            For r = blockStart To blockEnd
-                If CStr(wsLiv.Cells(r, COL_C).Value & "") = swdsMarker Then
-                    swdsStartRow = r
-                    Exit For
-                End If
-            Next r
-        End If
-
-        If swdsStartRow > blockStart Then
-            ApplyLightOutlineBorder wsLiv, blockStart, swdsStartRow - 1, lastCol
-        End If
-        If swdsStartRow <= blockEnd Then
-            ApplyLightOutlineBorder wsLiv, swdsStartRow, blockEnd, lastCol
-        End If
-        ApplyHardOutlineBorder wsLiv, blockStart, blockEnd, lastCol
-
-        blockStart = blockEnd + 1
-NextBlock:
-    Loop
 End Sub
 
 ' Computes Suivi column A key.
@@ -1368,134 +1183,6 @@ Public Function ComputeColT(B As String, C As String, D As String, _
 
     ComputeColT = ""
 End Function
-
-' Archives Suivi_Livrables into dated workbook and clears current data.
-Public Sub ArchiveSuiviLivrable()
-    Dim wsLiv As Worksheet
-    Dim wbNew As Workbook
-    Dim wsNew As Worksheet
-    Dim srcRng As Range
-    Dim dstRng As Range
-    Dim folderPath As String
-    Dim fileName As String
-    Dim fullPath As String
-    Dim ts As String
-    Dim dayFolder As String
-    Dim resp As VbMsgBoxResult
-    Dim confirmResp As VbMsgBoxResult
-    Dim shp As Shape
-    Dim lastRow As Long
-    Dim lastCol As Long
-    Dim c As Long
-    Dim r As Long
-    Dim cfg As String
-    Dim errLine As String
-
-    If m_ArchiveRunning Then Exit Sub
-    m_ArchiveRunning = True
-
-    On Error GoTo ErrHandler
-
-    ' Validate sheet and prepare output folder/file names.
-    If Not SheetExists(SH_LIV) Then
-        MsgBox "La feuille """ & SH_LIV & """ est introuvable.", vbExclamation
-        Exit Sub
-    End If
-
-    confirmResp = MsgBox("Confirmer l'archivage de """ & SH_LIV & """ ?" & vbCrLf & vbCrLf & _
-                         "Cette action va sauvegarder l'etat actuel puis vider les lignes actives de la feuille.", _
-                         vbYesNo + vbQuestion + vbDefaultButton2, "Confirmation archivage")
-    If confirmResp <> vbYes Then Exit Sub
-
-    folderPath = SHARED_FOLDER_PATH & "Archived\"
-    If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
-
-    dayFolder = folderPath & Format$(Date, "DDMMYYYY") & "\"
-    If Dir$(dayFolder, vbDirectory) = "" Then MkDir dayFolder
-
-    ts = Format(Now, "DDMMYYYY_HHMMSS")
-    fileName = "Suivi_Livrable_" & ts & ".xlsx"
-    fullPath = dayFolder & fileName
-
-    Application.ScreenUpdating = False
-    Application.DisplayAlerts = False
-    Application.EnableEvents = False
-
-    ' Copy sheet values + formatting into a new workbook.
-    Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
-    If wsLiv.AutoFilterMode Then wsLiv.AutoFilterMode = False
-
-    Set wbNew = Workbooks.Add(xlWBATWorksheet)
-    Set wsNew = wbNew.Worksheets(1)
-    wsNew.Name = wsLiv.Name
-
-    lastRow = wsLiv.UsedRange.Row + wsLiv.UsedRange.Rows.Count - 1
-    lastCol = wsLiv.UsedRange.Column + wsLiv.UsedRange.Columns.Count - 1
-    If lastRow < 1 Then lastRow = 1
-    If lastCol < 1 Then lastCol = 1
-
-    Set srcRng = wsLiv.Range(wsLiv.Cells(1, 1), wsLiv.Cells(lastRow, lastCol))
-    Set dstRng = wsNew.Range(wsNew.Cells(1, 1), wsNew.Cells(lastRow, lastCol))
-
-    srcRng.Copy
-    dstRng.PasteSpecial Paste:=xlPasteFormats
-    Application.CutCopyMode = False
-
-    dstRng.Value = srcRng.Value
-
-    For c = 1 To lastCol
-        wsNew.Columns(c).ColumnWidth = wsLiv.Columns(c).ColumnWidth
-    Next c
-    For r = 1 To lastRow
-        wsNew.Rows(r).RowHeight = wsLiv.Rows(r).RowHeight
-    Next r
-
-    For Each shp In wsNew.Shapes
-        shp.Delete
-    Next shp
-
-    wbNew.SaveAs fileName:=fullPath, _
-                  FileFormat:=xlOpenXMLWorkbook, _
-                  CreateBackup:=False
-    wbNew.Close SaveChanges:=False
-
-    ' Reset active livrables rows after archive save.
-    lastRow = wsLiv.Cells(wsLiv.Rows.Count, COL_B).End(xlUp).Row
-    If lastRow >= LIV_FIRST_ROW Then
-        wsLiv.Rows(LIV_FIRST_ROW & ":" & lastRow).Delete Shift:=xlUp
-    End If
-
-    resp = MsgBox("Archive enregistree et feuille reinitialisee." & vbCrLf & vbCrLf & _
-                  "Ouvrir le fichier archive maintenant ?" & vbCrLf & fullPath, _
-                  vbYesNo + vbInformation, "Archive")
-    If resp = vbYes Then
-        ThisWorkbook.FollowHyperlink fullPath
-    End If
-
-Cleanup:
-    Application.EnableEvents = True
-    Application.DisplayAlerts = True
-    Application.ScreenUpdating = True
-    m_ArchiveRunning = False
-    Exit Sub
-
-ErrHandler:
-    ' Log archive error and restore application state.
-    cfg = SHARED_FOLDER_PATH & "config\"
-    If Dir$(cfg, vbDirectory) = "" Then MkDir cfg
-    errLine = Format$(Now, "YYYY-MM-DD HH:NN:SS") & _
-              " | user=" & Environ$("USERNAME") & _
-              " | proc=ArchiveSuiviLivrable" & _
-              " | err=" & Err.Number & _
-              " | " & Err.Description
-    On Error Resume Next
-    AppendTextFile cfg & "error_logs.txt", errLine
-    Application.EnableEvents = True
-    Application.DisplayAlerts = True
-    Application.ScreenUpdating = True
-    m_ArchiveRunning = False
-    MsgBox "Echec de l'archivage : " & Err.Description, vbCritical
-End Sub
 
 ' Checks whether a sheet exists in current workbook.
 Public Function SheetExists(shName As String) As Boolean
