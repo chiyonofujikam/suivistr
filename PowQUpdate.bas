@@ -256,7 +256,7 @@ Cleanup:
 End Sub
 
 
-' Placeholder until UVR update logic is implemented.
+' Updates PowQ_Suivi_UVR (placeholder until implemented).
 Sub Update_PowQ_Suivi_UVR()
     MsgBox "Cette fonctionnalité est encore en cours de développement et n'est pas encore finalisée.", vbExclamation, "En cours de développement"
 End Sub

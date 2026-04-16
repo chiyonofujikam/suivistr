@@ -20,7 +20,7 @@ Public Function SHARED_FOLDER_PATH() As String
 
     Set dlg = Application.FileDialog(4)
     With dlg
-        .Title = "Select the shared folder for Suivi files (config\LOCK.txt, config\status.json)"
+        .Title = "Select the shared folder for Suivi files (Archived\, error_logs.txt)"
         .ButtonName = "Select"
         If .Show = -1 Then
             p = .SelectedItems(1)

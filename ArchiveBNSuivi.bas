@@ -1,21 +1,21 @@
 Option Explicit
 
-Private m_ArchiveRunning As Boolean
+Private m_ArchiveBNRunning As Boolean
 
-' Archives Suivi_Livrables into dated workbook and clears current data.
-Public Sub ArchiveSuiviLivrable()
-    Dim wsLiv As Worksheet
+' Archives BN_Suivi dossier Safety and clears all rows except 1 and 2.
+Public Sub ArchiveBNSuivi()
+    Dim wsBN As Worksheet
     Dim wbNew As Workbook
     Dim wsNew As Worksheet
     Dim srcRng As Range
     Dim dstRng As Range
     Dim folderPath As String
+    Dim dayFolder As String
     Dim fileName As String
     Dim fullPath As String
     Dim ts As String
-    Dim dayFolder As String
-    Dim resp As VbMsgBoxResult
     Dim confirmResp As VbMsgBoxResult
+    Dim resp As VbMsgBoxResult
     Dim shp As Shape
     Dim lastRow As Long
     Dim lastCol As Long
@@ -23,53 +23,51 @@ Public Sub ArchiveSuiviLivrable()
     Dim r As Long
     Dim errLine As String
 
-    If m_ArchiveRunning Then Exit Sub
-    m_ArchiveRunning = True
+    If m_ArchiveBNRunning Then Exit Sub
+    m_ArchiveBNRunning = True
 
     On Error GoTo ErrHandler
 
-    ' Validate sheet and prepare output folder/file names.
-    If Not SheetExists(SH_LIV) Then
-        MsgBox "La feuille """ & SH_LIV & """ est introuvable.", vbExclamation
+    If Not SheetExists("BN_Suivi dossier Safety") Then
+        MsgBox "La feuille ""BN_Suivi dossier Safety"" est introuvable.", vbExclamation
         Exit Sub
     End If
 
-    confirmResp = MsgBox("Confirmer l'archivage de """ & SH_LIV & """ ?" & vbCrLf & vbCrLf & _
-                         "Cette action va sauvegarder l'etat actuel puis vider les lignes actives de la feuille.", _
+    confirmResp = MsgBox("Confirmer l'archivage de ""BN_Suivi dossier Safety"" ?" & vbCrLf & vbCrLf & _
+                         "Cette action va sauvegarder l'etat actuel puis vider toutes les lignes.", _
                          vbYesNo + vbQuestion + vbDefaultButton2, "Confirmation archivage")
     If confirmResp <> vbYes Then GoTo Cleanup
 
     folderPath = SHARED_FOLDER_PATH & "Archived\"
     If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
 
-    folderPath = folderPath & "Suivi_Livrable\"
+    folderPath = folderPath & "BN_Suivi\"
     If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
 
     dayFolder = folderPath & Format$(Date, "DDMMYYYY") & "\"
     If Dir$(dayFolder, vbDirectory) = "" Then MkDir dayFolder
 
-    ts = Format(Now, "DDMMYYYY_HHMMSS")
-    fileName = "Suivi_Livrable_" & ts & ".xlsx"
+    ts = Format$(Now, "DDMMYYYY_HHMMSS")
+    fileName = "BN_Suivi_dossier_Safety_" & ts & ".xlsx"
     fullPath = dayFolder & fileName
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
     Application.EnableEvents = False
 
-    ' Copy sheet values + formatting into a new workbook.
-    Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
-    If wsLiv.AutoFilterMode Then wsLiv.AutoFilterMode = False
+    Set wsBN = ThisWorkbook.Sheets("BN_Suivi dossier Safety")
+    If wsBN.AutoFilterMode Then wsBN.AutoFilterMode = False
 
     Set wbNew = Workbooks.Add(xlWBATWorksheet)
     Set wsNew = wbNew.Worksheets(1)
-    wsNew.Name = wsLiv.Name
+    wsNew.Name = wsBN.Name
 
-    lastRow = wsLiv.UsedRange.Row + wsLiv.UsedRange.Rows.Count - 1
-    lastCol = wsLiv.UsedRange.Column + wsLiv.UsedRange.Columns.Count - 1
+    lastRow = wsBN.UsedRange.Row + wsBN.UsedRange.Rows.Count - 1
+    lastCol = wsBN.UsedRange.Column + wsBN.UsedRange.Columns.Count - 1
     If lastRow < 1 Then lastRow = 1
     If lastCol < 1 Then lastCol = 1
 
-    Set srcRng = wsLiv.Range(wsLiv.Cells(1, 1), wsLiv.Cells(lastRow, lastCol))
+    Set srcRng = wsBN.Range(wsBN.Cells(1, 1), wsBN.Cells(lastRow, lastCol))
     Set dstRng = wsNew.Range(wsNew.Cells(1, 1), wsNew.Cells(lastRow, lastCol))
 
     srcRng.Copy
@@ -79,10 +77,10 @@ Public Sub ArchiveSuiviLivrable()
     dstRng.Value = srcRng.Value
 
     For c = 1 To lastCol
-        wsNew.Columns(c).ColumnWidth = wsLiv.Columns(c).ColumnWidth
+        wsNew.Columns(c).ColumnWidth = wsBN.Columns(c).ColumnWidth
     Next c
     For r = 1 To lastRow
-        wsNew.Rows(r).RowHeight = wsLiv.Rows(r).RowHeight
+        wsNew.Rows(r).RowHeight = wsBN.Rows(r).RowHeight
     Next r
 
     For Each shp In wsNew.Shapes
@@ -94,15 +92,14 @@ Public Sub ArchiveSuiviLivrable()
                   CreateBackup:=False
     wbNew.Close SaveChanges:=False
 
-    ' Reset active livrables rows after archive save.
-    lastRow = wsLiv.Cells(wsLiv.Rows.Count, COL_B).End(xlUp).Row
-    If lastRow >= LIV_FIRST_ROW Then
-        wsLiv.Rows(LIV_FIRST_ROW & ":" & lastRow).Delete Shift:=xlUp
+    lastRow = wsBN.Cells(wsBN.Rows.Count, COL_B).End(xlUp).Row
+    If lastRow > 2 Then
+        wsBN.Rows("3:" & lastRow).Delete Shift:=xlUp
     End If
 
-    resp = MsgBox("Archive enregistree et feuille reinitialisee." & vbCrLf & vbCrLf & _
+    resp = MsgBox("Archive BN_Suivi enregistree et feuille reinitialisee." & vbCrLf & vbCrLf & _
                   "Ouvrir le fichier archive maintenant ?" & vbCrLf & fullPath, _
-                  vbYesNo + vbInformation, "Archive")
+                  vbYesNo + vbInformation, "Archive BN_Suivi")
     If resp = vbYes Then
         ThisWorkbook.FollowHyperlink fullPath
     End If
@@ -111,14 +108,13 @@ Cleanup:
     Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
-    m_ArchiveRunning = False
+    m_ArchiveBNRunning = False
     Exit Sub
 
 ErrHandler:
-    ' Log archive error and restore application state.
     errLine = Format$(Now, "YYYY-MM-DD HH:NN:SS") & _
               " | user=" & Environ$("USERNAME") & _
-              " | proc=ArchiveSuiviLivrable" & _
+              " | proc=ArchiveBNSuivi" & _
               " | err=" & Err.Number & _
               " | " & Err.Description
     On Error Resume Next
@@ -126,6 +122,6 @@ ErrHandler:
     Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
-    m_ArchiveRunning = False
-    MsgBox "Echec de l'archivage : " & Err.Description, vbCritical
+    m_ArchiveBNRunning = False
+    MsgBox "Echec de l'archivage BN_Suivi : " & Err.Description, vbCritical
 End Sub

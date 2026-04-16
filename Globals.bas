@@ -6,7 +6,6 @@ Public Const SH_LIV        As String = "Suivi_Livrables"
 Public Const SH_EXTRACT    As String = "PowQ_Extract"
 Public Const SH_UVR        As String = "PowQ_Suivi_UVR"
 Public Const SH_VHST       As String = "PowQ_EDU_CE_VHST"
-Public Const SH_TMP        As String = "Suivi_Livrables_Tmp"
 
 ' First data row indexes per sheet.
 Public Const CR_FIRST_ROW  As Long = 3

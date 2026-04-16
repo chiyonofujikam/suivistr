@@ -3,7 +3,7 @@
     <tabs>
       <tab id="SuiviTab" label="Suivi STR">
         <group id="SuiviGroup" label="Suivi">
-          <button id="BtnUpdate" imageMso="Refresh" size="large"
+          <button id="BtnUpdate" imageMso="TableInsertRowsAbove" size="large"
                   label="Mise à jour"
                   screentip="Lancer la mise à jour du Suivi Livrables à partir du Suivi CR"
                   onAction="Ribbon_UpdateSuivi"/>
@@ -14,19 +14,31 @@
         </group>
         <group id="PowQGroup" label="PowQ">
           <button id="BtnPowQExtract" imageMso="ImportExcel" size="large"
-                  label="PowQ Extract"
+                  label="Extract"
                   screentip="Mettre à jour la feuille PowQ_Extract à partir d'un fichier d'entrée"
                   onAction="Ribbon_PowQExtract"/>
-          <button id="BtnPowQUVR" imageMso="TableInsert" size="large"
-                  label="PowQ UVR"
-                  screentip="Mettre à jour le Suivi UVR depuis PowQ (en cours de développement)"
+          <button id="BtnPowQUVR" imageMso="ImportExcel" size="large"
+                  label="Suivi_UVR"
+                  screentip="Mettre à jour le Suivi UVR depuis PowQ"
                   onAction="Ribbon_PowQUVR"/>
+          <button id="BtnPowQEDUCEVHST" imageMso="TableInsert" size="large"
+                  label="EDU_CE_VHST"
+                  screentip="Mettre à jour la feuille PowQ_EDU_CE_VHST"
+                  onAction="Ribbon_PowQEDUCEVHST"/>
+          <button id="BtnPowQAll" imageMso="Refresh" size="large"
+                  label="PowQ Tout"
+                  screentip="Lancer toutes les mises à jour PowQ du groupe"
+                  onAction="Ribbon_PowQAll"/>
         </group>
         <group id="DossierSafetyGroup" label="Dossier Safety">
           <button id="BtnAddBNSuivi" imageMso="TableInsertRowsAbove" size="large"
-                  label="Ajouter BN_Suivi"
-                  screentip="Ajouter BN_Suivi"
+                  label="Compléter BN_Suivi"
+                  screentip="Compléter automatiquement la feuille BN_Suivi dossier Safety dans le classeur"
                   onAction="Ribbon_AddBNSuivi"/>
+          <button id="BtnArchiveBNSuivi" imageMso="Clear" size="large"
+                  label="Archiver BN_Suivi"
+                  screentip="Archiver puis vider la feuille BN_Suivi dossier Safety"
+                  onAction="Ribbon_ArchiveBNSuivi"/>
         </group>
       </tab>
     </tabs>

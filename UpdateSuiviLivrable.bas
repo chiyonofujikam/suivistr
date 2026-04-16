@@ -33,7 +33,7 @@ Public Sub UpdateSuiviLivrable()
     Dim errSource As String
     Dim vhstSTRMap As Object
     Dim fonctions As Collection
-    Dim configDir As String
+    Dim logPath As String
 
     On Error GoTo ErrHandler
     lockCreated = False
@@ -55,8 +55,7 @@ Public Sub UpdateSuiviLivrable()
     wsCR.Range("I1").Locked = False
     wsCR.Protect Password:="suivi_update", UserInterfaceOnly:=False
 
-    configDir = SHARED_FOLDER_PATH & "config\"
-    If Dir$(configDir, vbDirectory) = "" Then MkDir configDir
+    logPath = SHARED_FOLDER_PATH & "error_logs.txt"
 
     ' Validate setup and load source arrays.
     ValidateRequiredSheets
@@ -167,7 +166,7 @@ ErrHandler:
     errSource = Err.Source
 
     On Error Resume Next
-    AppendTextFile configDir & "error_logs.txt", _
+    AppendTextFile logPath, _
         Format$(Now, "YYYY-MM-DD HH:NN:SS") & _
         " | user=" & Environ$("USERNAME") & _
         " | err=" & errNumber & _
