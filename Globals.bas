@@ -36,10 +36,6 @@ Public Const COL_W As Long = 23
 Public Const COL_X As Long = 24
 Public Const COL_Y As Long = 25
 
-' Dynamic block generation settings.
-Public Const SECTION_ADL1 As String = "ADL1"
-Public Const SECTION_SWDS As String = "SWDS"
-
 ' Placeholder colors (BGR hex in VBA Long). Adjust values as needed.
 Public Const COLOR_B_BASE_ADL1 As Long = &H00FBEDCA
 Public Const COLOR_B_BASE_SWDS As Long = &H00D0F2DA

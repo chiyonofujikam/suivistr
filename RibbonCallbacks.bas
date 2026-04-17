@@ -1,5 +1,10 @@
 Option Explicit
 
+' Ribbon callback for save-copy button.
+Public Sub Ribbon_SaveWorkbookCopy(ByVal control As Object)
+    RunMacroSafe "Sauvegarde copie classeur", "SaveWorkbookCopyToSelectedDestination", "SaveModule.SaveWorkbookCopyToSelectedDestination"
+End Sub
+
 ' Ribbon callback for main update button.
 Public Sub Ribbon_UpdateSuivi(ByVal control As Object)
     RunMacroSafe "Mise a jour", "UpdateSuiviLivrable", "UpdateSuiviLivrable.UpdateSuiviLivrable"

@@ -9,7 +9,7 @@ Private m_SharedFolder As String
 #End If
 
 ' Gets and caches the shared folder selected by the user.
-Public Function SHARED_FOLDER_PATH() As String
+Public Function SHARED_FOLDER_PATH(Optional ByVal raiseIfMissing As Boolean = True) As String
     Dim dlg As Object
     Dim p As String
 
@@ -27,8 +27,13 @@ Public Function SHARED_FOLDER_PATH() As String
             If Right$(p, 1) <> "\" Then p = p & "\"
             m_SharedFolder = p
         Else
-            Err.Raise vbObjectError + 1, "SHARED_FOLDER_PATH", _
-                "No shared folder selected. Update cancelled."
+            If raiseIfMissing Then
+                Err.Raise vbObjectError + 1, "SHARED_FOLDER_PATH", _
+                    "Aucun dossier partage selectionne. La mise a jour est annulee."
+            Else
+                SHARED_FOLDER_PATH = ""
+                Exit Function
+            End If
         End If
     End With
 
@@ -598,20 +603,35 @@ Public Function BuildSTRMapVHST(vhstArr As Variant) As Object
     Set BuildSTRMapVHST = dict
 End Function
 
-' Builds unique global Fonction list from VHST sheet (column F).
+' Builds unique global Fonction list from VHST sheet using header "Fonctions".
 Public Function BuildFonctionsFromVHST(vhstArr As Variant) As Collection
     Dim result As New Collection
     Dim seen As Object
     Dim r As Long
     Dim fn As String
+    Dim fonctionsCol As Long
+    Dim c As Long
 
     Set seen = CreateObject("Scripting.Dictionary")
     seen.CompareMode = vbTextCompare
 
     If Not IsEmpty(vhstArr) Then
-        If UBound(vhstArr, 1) >= 2 And UBound(vhstArr, 2) >= COL_F Then
+        If UBound(vhstArr, 1) >= 2 Then
+            fonctionsCol = 0
+            For c = 1 To UBound(vhstArr, 2)
+                If StrComp(Trim$(CStr(vhstArr(1, c) & "")), "Fonctions", vbTextCompare) = 0 Then
+                    fonctionsCol = c
+                    Exit For
+                End If
+            Next c
+
+            If fonctionsCol = 0 Then
+                Set BuildFonctionsFromVHST = result
+                Exit Function
+            End If
+
             For r = 2 To UBound(vhstArr, 1)
-                fn = Trim$(CStr(vhstArr(r, COL_F) & ""))
+                fn = Trim$(CStr(vhstArr(r, fonctionsCol) & ""))
                 If fn <> "" Then
                     If Not seen.Exists(fn) Then
                         seen(fn) = True
@@ -624,6 +644,114 @@ Public Function BuildFonctionsFromVHST(vhstArr As Variant) As Collection
 
     Set BuildFonctionsFromVHST = result
 End Function
+
+' Builds unique global TypeLivrable list from VHST sheet using header "Type de livrable".
+Public Function BuildTypeLivrablesFromVHST(vhstArr As Variant) As Collection
+    Dim result As New Collection
+    Dim seen As Object
+    Dim r As Long
+    Dim typeLivrableName As String
+    Dim typeLivrableCol As Long
+    Dim c As Long
+
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = vbTextCompare
+
+    If Not IsEmpty(vhstArr) Then
+        If UBound(vhstArr, 1) >= 2 Then
+            typeLivrableCol = 0
+            For c = 1 To UBound(vhstArr, 2)
+                If StrComp(Trim$(CStr(vhstArr(1, c) & "")), "Type de livrable", vbTextCompare) = 0 Then
+                    typeLivrableCol = c
+                    Exit For
+                End If
+            Next c
+
+            If typeLivrableCol = 0 Then
+                Set BuildTypeLivrablesFromVHST = result
+                Exit Function
+            End If
+
+            For r = 2 To UBound(vhstArr, 1)
+                typeLivrableName = Trim$(CStr(vhstArr(r, typeLivrableCol) & ""))
+                If typeLivrableName <> "" Then
+                    If Not seen.Exists(typeLivrableName) Then
+                        seen(typeLivrableName) = True
+                        result.Add typeLivrableName
+                    End If
+                End If
+            Next r
+        End If
+    End If
+
+    Set BuildTypeLivrablesFromVHST = result
+End Function
+
+' Ensures default Type livrables (ADL1, SwDS) exist in VHST.
+Public Sub EnsureDefaultTypeLivrablesInVHST(wsVHST As Worksheet)
+    Dim tbl As ListObject
+    Dim lc As ListColumn
+    Dim i As Long
+    Dim lastCol As Long
+    Dim lastRow As Long
+    Dim targetCol As Long
+    Dim c As Long
+    Dim headerValue As String
+
+    On Error Resume Next
+    Set tbl = wsVHST.ListObjects("EDU_CE_VHST")
+    On Error GoTo 0
+
+    If Not tbl Is Nothing Then
+        Set lc = Nothing
+        For i = 1 To tbl.ListColumns.Count
+            If StrComp(Trim$(CStr(tbl.ListColumns(i).Name & "")), "Type de livrable", vbTextCompare) = 0 Then
+                Set lc = tbl.ListColumns(i)
+                Exit For
+            End If
+        Next i
+
+        If lc Is Nothing Then
+            Set lc = tbl.ListColumns.Add
+            lc.Name = "Type de livrable"
+        End If
+
+        Do While tbl.ListRows.Count < 2
+            tbl.ListRows.Add
+        Loop
+
+        If Not lc.DataBodyRange Is Nothing Then
+            lc.DataBodyRange.ClearContents
+            lc.DataBodyRange.Cells(1, 1).Value = "ADL1"
+            lc.DataBodyRange.Cells(2, 1).Value = "SwDS"
+        End If
+        Exit Sub
+    End If
+
+    targetCol = 0
+    lastCol = wsVHST.Cells(1, wsVHST.Columns.Count).End(xlToLeft).Column
+    If lastCol < 1 Then lastCol = 1
+
+    For c = 1 To lastCol
+        headerValue = Trim$(CStr(wsVHST.Cells(1, c).Value & ""))
+        If StrComp(headerValue, "Type de livrable", vbTextCompare) = 0 Then
+            targetCol = c
+            Exit For
+        End If
+    Next c
+
+    If targetCol = 0 Then
+        targetCol = lastCol + 1
+        wsVHST.Cells(1, targetCol).Value = "Type de livrable"
+    End If
+
+    lastRow = wsVHST.Cells(wsVHST.Rows.Count, targetCol).End(xlUp).Row
+    If lastRow < 2 Then lastRow = 2
+    wsVHST.Range(wsVHST.Cells(2, targetCol), wsVHST.Cells(lastRow, targetCol)).ClearContents
+
+    wsVHST.Cells(2, targetCol).Value = "ADL1"
+    wsVHST.Cells(3, targetCol).Value = "SwDS"
+End Sub
 
 
 ' Builds actual max sprint map from CR data.

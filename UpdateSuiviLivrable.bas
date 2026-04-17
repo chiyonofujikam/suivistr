@@ -33,6 +33,8 @@ Public Sub UpdateSuiviLivrable()
     Dim errSource As String
     Dim vhstSTRMap As Object
     Dim fonctions As Collection
+    Dim typeLivrables As Collection
+    Dim typeLivrableFallbackResp As VbMsgBoxResult
     Dim logPath As String
 
     On Error GoTo ErrHandler
@@ -55,7 +57,18 @@ Public Sub UpdateSuiviLivrable()
     wsCR.Range("I1").Locked = False
     wsCR.Protect Password:="suivi_update", UserInterfaceOnly:=False
 
-    logPath = SHARED_FOLDER_PATH & "error_logs.txt"
+    On Error Resume Next
+    logPath = SHARED_FOLDER_PATH(False)
+    If Err.Number <> 0 Or Trim$(logPath) = "" Then
+        Err.Clear
+        On Error GoTo ErrHandler
+        MsgBox "La selection du dossier partage n'a pas ete finalisee correctement." & vbCrLf & _
+               "La mise a jour est annulee.", vbExclamation, "Mise a jour Suivi"
+        GoTo Cleanup
+    End If
+    On Error GoTo ErrHandler
+    If Right$(logPath, 1) <> "\" Then logPath = logPath & "\"
+    logPath = logPath & "error_logs.txt"
 
     ' Validate setup and load source arrays.
     ValidateRequiredSheets
@@ -84,9 +97,24 @@ Public Sub UpdateSuiviLivrable()
     Set uvrColMap = BuildUVRColumnMap(wsLiv, uvrArr)
     Set maxSprintMap = BuildMaxSprintMapVHST(vhstArr)
     Set fonctions = BuildFonctionsFromVHST(vhstArr)
+    Set typeLivrables = BuildTypeLivrablesFromVHST(vhstArr)
     If fonctions.Count = 0 Then
         Err.Raise vbObjectError + 2001, "UpdateSuiviLivrable", _
-                  "Aucune fonction disponible dans " & SH_VHST & " (colonne F)."
+                  "Aucune fonction disponible dans " & SH_VHST & " (colonne 'Fonctions')."
+    End If
+    If typeLivrables.Count = 0 Then
+        typeLivrableFallbackResp = MsgBox( _
+            "Aucun type livrable disponible dans " & SH_VHST & " (colonne 'Type de livrable')." & vbCrLf & vbCrLf & _
+            "Voulez-vous utiliser les types de livrables par defaut ADL1 et SwDS ?", _
+            vbYesNo + vbQuestion, "Mise a jour Suivi")
+        If typeLivrableFallbackResp = vbYes Then
+            EnsureDefaultTypeLivrablesInVHST ThisWorkbook.Sheets(SH_VHST)
+            vhstArr = LoadSheetData(ThisWorkbook.Sheets(SH_VHST))
+            Set typeLivrables = BuildTypeLivrablesFromVHST(vhstArr)
+        Else
+            Err.Raise vbObjectError + 2002, "UpdateSuiviLivrable", _
+                      "Aucun type livrable disponible dans " & SH_VHST & " (colonne 'Type de livrable')."
+        End If
     End If
 
     If vhstSTRMap.Count = 0 Then
@@ -108,13 +136,13 @@ Public Sub UpdateSuiviLivrable()
     For Each strKey In vhstSTRMap.Keys
         Set strSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap)
         maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, strSprints)
-        nrows = GeneratedBlockRowCount(strSprints, fonctions)
+        nrows = GeneratedBlockRowCount(strSprints, fonctions, typeLivrables)
         If nrows <= 0 Then GoTo NextStr
 
         insertRow = GetLastDataRow(wsLiv, COL_B) + 1
         If insertRow < LIV_FIRST_ROW Then insertRow = LIV_FIRST_ROW
         wsLiv.Rows(insertRow & ":" & (insertRow + nrows - 1)).Insert Shift:=xlDown
-        br = InsertGeneratedSTRBlock(wsLiv, insertRow, CStr(strKey), strSprints, fonctions, lastBorderCol, maxSprintKey)
+        br = InsertGeneratedSTRBlock(wsLiv, insertRow, CStr(strKey), strSprints, fonctions, typeLivrables, lastBorderCol, maxSprintKey)
 
         livArr = LoadSheetData(wsLiv)
         For rr = br(0) To br(1)

@@ -62,6 +62,16 @@ Private Function StripBracketsAndDigits(ByVal s As String) As String
     StripBracketsAndDigits = s
 End Function
 
+' Returns target header row for PowQ_Extract.
+Private Function PowQExtractHeaders() As Variant
+    PowQExtractHeaders = Array( _
+        "Code tache", "str", "Fonction_1", "Pôle_2", "Nom_3", _
+        "Nom simple", "Ressource", "Début_4", "Fin_5", "Travaille", _
+        "% reel", "% théorique", "Début Ref", "Fin Ref", "travail ref", _
+        "Dec", "Raison", "Début précedent", "Fin précédent", "Actif_6", _
+        "Sprint", "Reprise valid", "Valid fonction", "Ressources", "NB CR")
+End Function
+
 
 ' Rebuilds PowQ_Extract from a selected input workbook.
 Sub Update_PowQ_Exract()
@@ -81,8 +91,10 @@ Sub Update_PowQ_Exract()
     Dim outG As Variant, outT As Variant, outU As Variant
     Dim tbl As ListObject
     Dim tblRange As Range
+    Dim targetRange As Range
     Dim filtered() As Variant
     Dim filteredCount As Long
+    Dim headers As Variant
 
     ' Ask user for the source workbook.
     inputFilePath = Application.GetOpenFilename( _
@@ -214,6 +226,12 @@ SkipRow:
 SkipRow2:
     Next i
 
+    ' Force expected headers/order for PowQ_Extract table.
+    headers = PowQExtractHeaders()
+    For col = 0 To UBound(headers)
+        wsOutput.Cells(1, col + 1).Value = headers(col)
+    Next col
+
     ' Replace existing output data.
     lastRowOutput = wsOutput.Cells(wsOutput.Rows.Count, 1).End(xlUp).Row
     If lastRowOutput >= 2 Then
@@ -229,15 +247,15 @@ SkipRow2:
         .Range("N2:N" & (filteredCount + 1)).NumberFormat = "0"
     End With
 
-    ' Recreate output table.
-    For Each tbl In wsOutput.ListObjects
-        If tbl.Name = "Extract_MSP" Then
-            tbl.Unlist
-            Exit For
-        End If
-    Next tbl
+    ' Recreate output table after removing only Extract_MSP on PowQ_Extract.
+    Set targetRange = wsOutput.Range("A1:Y" & (filteredCount + 1))
 
-    Set tblRange = wsOutput.Range("A1:Y" & (filteredCount + 1))
+    On Error Resume Next
+    Set tbl = wsOutput.ListObjects("Extract_MSP")
+    On Error GoTo ErrHandler
+    If Not tbl Is Nothing Then tbl.Unlist
+
+    Set tblRange = targetRange
     Set tbl = wsOutput.ListObjects.Add(xlSrcRange, tblRange, , xlYes)
     tbl.Name = "Extract_MSP"
 

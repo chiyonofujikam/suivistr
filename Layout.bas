@@ -23,79 +23,77 @@ Public Function DarkenColor(ByVal baseColor As Long, ByVal sprintIndex As Long, 
     DarkenColor = RGB(r, g, b)
 End Function
 
-' Creates block rows for one STR: ADL1 (all sprints/functions) then SWDS.
+' Returns base color for column B by TypeLivrable order.
+Private Function TypeLivrableBaseColorByIndex(ByVal typeLivrableIndex As Long) As Long
+    Select Case ((typeLivrableIndex - 1) Mod 2) + 1
+        Case 1
+            TypeLivrableBaseColorByIndex = COLOR_B_BASE_ADL1
+        Case Else
+            TypeLivrableBaseColorByIndex = COLOR_B_BASE_SWDS
+    End Select
+End Function
+
+' Returns base color for column C by TypeLivrable order.
+Private Function TypeLivrableLabelColorByIndex(ByVal typeLivrableIndex As Long) As Long
+    Select Case ((typeLivrableIndex - 1) Mod 2) + 1
+        Case 1
+            TypeLivrableLabelColorByIndex = COLOR_C_ADL1
+        Case Else
+            TypeLivrableLabelColorByIndex = COLOR_C_SWDS
+    End Select
+End Function
+
+' Creates block rows for one STR and all discovered type livrables.
 Public Function InsertGeneratedSTRBlock(wsLiv As Worksheet, ByVal startRow As Long, _
                                         ByVal strKey As String, strSprints As Collection, _
-                                        fonctions As Collection, ByVal lastCol As Long, _
-                                        ByVal maxSprintKey As String) As Variant
+                                        fonctions As Collection, typeLivrables As Collection, _
+                                        ByVal lastCol As Long, ByVal maxSprintKey As String) As Variant
     Dim rowPtr As Long
     Dim sp As Variant
     Dim fn As Variant
-    Dim sectionTop As Long
-    Dim sectionBottom As Long
+    Dim typeLivrable As Variant
+    Dim typeLivrableTop As Long
+    Dim typeLivrableBottom As Long
     Dim blockTop As Long
     Dim blockBottom As Long
     Dim sprintKey As String
     Dim sprintColorD As Long
+    Dim typeLivrableIdx As Long
 
     blockTop = startRow
     rowPtr = startRow
 
-    sectionTop = rowPtr
-    For Each sp In strSprints
-        sprintKey = CStr(sp)
-        sprintColorD = DarkenColor(COLOR_BASE_SPRINT, CLng(Val(sprintKey)))
-        For Each fn In fonctions
-            wsLiv.Cells(rowPtr, COL_B).Value = strKey
-            wsLiv.Cells(rowPtr, COL_C).Value = SECTION_ADL1
-            wsLiv.Cells(rowPtr, COL_D).Value = sprintKey
-            wsLiv.Cells(rowPtr, COL_E).Value = CStr(fn)
+    typeLivrableIdx = 0
+    For Each typeLivrable In typeLivrables
+        typeLivrableIdx = typeLivrableIdx + 1
+        typeLivrableTop = rowPtr
+        For Each sp In strSprints
+            sprintKey = CStr(sp)
+            sprintColorD = DarkenColor(COLOR_BASE_SPRINT, CLng(Val(sprintKey)))
+            For Each fn In fonctions
+                wsLiv.Cells(rowPtr, COL_B).Value = strKey
+                wsLiv.Cells(rowPtr, COL_C).Value = CStr(typeLivrable)
+                wsLiv.Cells(rowPtr, COL_D).Value = sprintKey
+                wsLiv.Cells(rowPtr, COL_E).Value = CStr(fn)
 
-            ' Keep backgrounds only where managed by the generation rules.
-            wsLiv.Range(wsLiv.Cells(rowPtr, 1), wsLiv.Cells(rowPtr, lastCol)).Interior.ColorIndex = xlNone
-            wsLiv.Cells(rowPtr, COL_B).Interior.Color = COLOR_B_BASE_ADL1
-            wsLiv.Cells(rowPtr, COL_C).Interior.Color = COLOR_C_ADL1
-            wsLiv.Cells(rowPtr, COL_D).Interior.Color = sprintColorD
-            If maxSprintKey <> "" And sprintKey = maxSprintKey Then
-                wsLiv.Range(wsLiv.Cells(rowPtr, COL_U), wsLiv.Cells(rowPtr, COL_X)).Interior.Color = COLOR_YELLOW_ZONE
-            Else
-                wsLiv.Range(wsLiv.Cells(rowPtr, COL_U), wsLiv.Cells(rowPtr, COL_X)).Interior.Color = COLOR_UX_DEFAULT
-            End If
-            rowPtr = rowPtr + 1
-        Next fn
-    Next sp
-    sectionBottom = rowPtr - 1
-    If sectionBottom >= sectionTop Then
-        ApplyLightOutlineBorder wsLiv, sectionTop, sectionBottom, lastCol
-    End If
-
-    sectionTop = rowPtr
-    For Each sp In strSprints
-        sprintKey = CStr(sp)
-        sprintColorD = DarkenColor(COLOR_BASE_SPRINT, CLng(Val(sprintKey)))
-        For Each fn In fonctions
-            wsLiv.Cells(rowPtr, COL_B).Value = strKey
-            wsLiv.Cells(rowPtr, COL_C).Value = SECTION_SWDS
-            wsLiv.Cells(rowPtr, COL_D).Value = sprintKey
-            wsLiv.Cells(rowPtr, COL_E).Value = CStr(fn)
-
-            ' Keep backgrounds only where managed by the generation rules.
-            wsLiv.Range(wsLiv.Cells(rowPtr, 1), wsLiv.Cells(rowPtr, lastCol)).Interior.ColorIndex = xlNone
-            wsLiv.Cells(rowPtr, COL_B).Interior.Color = COLOR_B_BASE_SWDS
-            wsLiv.Cells(rowPtr, COL_C).Interior.Color = COLOR_C_SWDS
-            wsLiv.Cells(rowPtr, COL_D).Interior.Color = sprintColorD
-            If maxSprintKey <> "" And sprintKey = maxSprintKey Then
-                wsLiv.Range(wsLiv.Cells(rowPtr, COL_U), wsLiv.Cells(rowPtr, COL_X)).Interior.Color = COLOR_YELLOW_ZONE
-            Else
-                wsLiv.Range(wsLiv.Cells(rowPtr, COL_U), wsLiv.Cells(rowPtr, COL_X)).Interior.Color = COLOR_UX_DEFAULT
-            End If
-            rowPtr = rowPtr + 1
-        Next fn
-    Next sp
-    sectionBottom = rowPtr - 1
-    If sectionBottom >= sectionTop Then
-        ApplyLightOutlineBorder wsLiv, sectionTop, sectionBottom, lastCol
-    End If
+                ' Keep backgrounds only where managed by the generation rules.
+                wsLiv.Range(wsLiv.Cells(rowPtr, 1), wsLiv.Cells(rowPtr, lastCol)).Interior.ColorIndex = xlNone
+                wsLiv.Cells(rowPtr, COL_B).Interior.Color = TypeLivrableBaseColorByIndex(typeLivrableIdx)
+                wsLiv.Cells(rowPtr, COL_C).Interior.Color = TypeLivrableLabelColorByIndex(typeLivrableIdx)
+                wsLiv.Cells(rowPtr, COL_D).Interior.Color = sprintColorD
+                If maxSprintKey <> "" And sprintKey = maxSprintKey Then
+                    wsLiv.Range(wsLiv.Cells(rowPtr, COL_U), wsLiv.Cells(rowPtr, COL_X)).Interior.Color = COLOR_YELLOW_ZONE
+                Else
+                    wsLiv.Range(wsLiv.Cells(rowPtr, COL_U), wsLiv.Cells(rowPtr, COL_X)).Interior.Color = COLOR_UX_DEFAULT
+                End If
+                rowPtr = rowPtr + 1
+            Next fn
+        Next sp
+        typeLivrableBottom = rowPtr - 1
+        If typeLivrableBottom >= typeLivrableTop Then
+            ApplyLightOutlineBorder wsLiv, typeLivrableTop, typeLivrableBottom, lastCol
+        End If
+    Next typeLivrable
 
     blockBottom = rowPtr - 1
     If blockBottom >= blockTop Then
@@ -106,8 +104,9 @@ Public Function InsertGeneratedSTRBlock(wsLiv As Worksheet, ByVal startRow As Lo
 End Function
 
 ' Returns row count for one generated STR block.
-Public Function GeneratedBlockRowCount(strSprints As Collection, fonctions As Collection) As Long
-    GeneratedBlockRowCount = 2 * CLng(strSprints.Count) * CLng(fonctions.Count)
+Public Function GeneratedBlockRowCount(strSprints As Collection, fonctions As Collection, _
+                                       typeLivrables As Collection) As Long
+    GeneratedBlockRowCount = CLng(typeLivrables.Count) * CLng(strSprints.Count) * CLng(fonctions.Count)
 End Function
 
 ' Applies number/date/text formats by Suivi_Livrables column rules.
@@ -331,12 +330,13 @@ End Sub
 ' Rebuilds block borders for all STR sections.
 Public Sub RebuildSuiviLivrablesBorders(wsLiv As Worksheet, ByVal lastCol As Long)
     Dim lastRow As Long
-    Dim r As Long
     Dim blockStart As Long
     Dim blockEnd As Long
     Dim curStr As String
     Dim nextStr As String
-    Dim swdsStartRow As Long
+    Dim sectionStart As Long
+    Dim currentSection As String
+    Dim nextSection As String
 
     lastRow = wsLiv.Cells(wsLiv.Rows.Count, COL_B).End(xlUp).Row
     If lastRow < LIV_FIRST_ROW Then Exit Sub
@@ -360,20 +360,26 @@ Public Sub RebuildSuiviLivrablesBorders(wsLiv As Worksheet, ByVal lastCol As Lon
             blockEnd = blockEnd + 1
         Loop
 
-        swdsStartRow = blockEnd + 1
-        For r = blockStart To blockEnd
-            If UCase$(Trim$(CStr(wsLiv.Cells(r, COL_C).Value & ""))) = SECTION_SWDS Then
-                swdsStartRow = r
-                Exit For
-            End If
-        Next r
+        sectionStart = blockStart
+        currentSection = Trim$(CStr(wsLiv.Cells(blockStart, COL_C).Value & ""))
 
-        If swdsStartRow > blockStart Then
-            ApplyLightOutlineBorder wsLiv, blockStart, swdsStartRow - 1, lastCol
-        End If
-        If swdsStartRow <= blockEnd Then
-            ApplyLightOutlineBorder wsLiv, swdsStartRow, blockEnd, lastCol
-        End If
+        Do While sectionStart <= blockEnd
+            Dim sectionEnd As Long
+            sectionEnd = sectionStart
+            Do While sectionEnd < blockEnd
+                nextSection = Trim$(CStr(wsLiv.Cells(sectionEnd + 1, COL_C).Value & ""))
+                If StrComp(nextSection, currentSection, vbTextCompare) <> 0 Then Exit Do
+                sectionEnd = sectionEnd + 1
+            Loop
+
+            ApplyLightOutlineBorder wsLiv, sectionStart, sectionEnd, lastCol
+
+            sectionStart = sectionEnd + 1
+            If sectionStart <= blockEnd Then
+                currentSection = Trim$(CStr(wsLiv.Cells(sectionStart, COL_C).Value & ""))
+            End If
+        Loop
+
         ApplyHardOutlineBorder wsLiv, blockStart, blockEnd, lastCol
 
         blockStart = blockEnd + 1

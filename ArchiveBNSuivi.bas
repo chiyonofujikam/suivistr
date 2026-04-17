@@ -22,6 +22,7 @@ Public Sub ArchiveBNSuivi()
     Dim c As Long
     Dim r As Long
     Dim errLine As String
+    Dim sharedFolderPath As String
 
     If m_ArchiveBNRunning Then Exit Sub
     m_ArchiveBNRunning = True
@@ -38,7 +39,19 @@ Public Sub ArchiveBNSuivi()
                          vbYesNo + vbQuestion + vbDefaultButton2, "Confirmation archivage")
     If confirmResp <> vbYes Then GoTo Cleanup
 
-    folderPath = SHARED_FOLDER_PATH & "Archived\"
+    On Error Resume Next
+    sharedFolderPath = SHARED_FOLDER_PATH(False)
+    If Err.Number <> 0 Or Trim$(sharedFolderPath) = "" Then
+        Err.Clear
+        On Error GoTo ErrHandler
+        MsgBox "La selection du dossier partage n'a pas ete finalisee correctement." & vbCrLf & _
+               "L'archivage est annule.", vbExclamation, "Archivage BN_Suivi"
+        GoTo Cleanup
+    End If
+    On Error GoTo ErrHandler
+    If Right$(sharedFolderPath, 1) <> "\" Then sharedFolderPath = sharedFolderPath & "\"
+
+    folderPath = sharedFolderPath & "Archived\"
     If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
 
     folderPath = folderPath & "BN_Suivi\"
@@ -118,7 +131,9 @@ ErrHandler:
               " | err=" & Err.Number & _
               " | " & Err.Description
     On Error Resume Next
-    AppendTextFile SHARED_FOLDER_PATH & "error_logs.txt", errLine
+    If Trim$(sharedFolderPath) <> "" Then
+        AppendTextFile sharedFolderPath & "error_logs.txt", errLine
+    End If
     Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
