@@ -2,12 +2,12 @@
   <ribbon startFromScratch="false">
     <tabs>
       <tab id="SuiviTab" label="Suivi STR">
-        <group id="SaveGroup" label="Sauvegarde">
+        <!-- <group id="SaveGroup" label="Sauvegarde">
           <button id="BtnSaveCopy" imageMso="FileSaveAs" size="large"
                   label="Créer un fichier Suivi d'un Pôle"
                   screentip="Créer un fichier Suivi d'un Pôle et l'enregistrer dans un dossier choisi"
                   onAction="Ribbon_SaveWorkbookCopy"/>
-        </group>
+        </group> -->
         <group id="SuiviGroup" label="Suivi">
           <button id="BtnUpdate" imageMso="TableInsertRowsAbove" size="large"
                   label="Mise à jour"

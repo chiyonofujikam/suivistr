@@ -383,7 +383,7 @@ End Function
 Public Function FindFinRefColumn(powqArr As Variant) As Long
     Dim c As Long
     For c = 1 To UBound(powqArr, 2)
-        If LCase(CStr(powqArr(1, c) & "")) = "fin ref" Then
+        If LCase(CStr(powqArr(1, c) & "")) = LCase(HDR_FIN_REF) Then
             FindFinRefColumn = c
             Exit Function
         End If
@@ -551,6 +551,8 @@ Public Function BuildMaxSprintMapVHST(vhstArr As Variant) As Object
     Dim r As Long
     Dim k As String
     Dim sp As String
+    Dim strCol As Long
+    Dim sprintsCol As Long
 
     Set dict = CreateObject("Scripting.Dictionary")
     dict.CompareMode = vbTextCompare
@@ -564,10 +566,17 @@ Public Function BuildMaxSprintMapVHST(vhstArr As Variant) As Object
         Exit Function
     End If
 
+    strCol = FindHeaderColumnInArray(vhstArr, HDR_NOM_STR)
+    sprintsCol = FindHeaderColumnInArray(vhstArr, HDR_SPRINTS)
+    If strCol = 0 Or sprintsCol = 0 Then
+        Set BuildMaxSprintMapVHST = dict
+        Exit Function
+    End If
+
     For r = 2 To UBound(vhstArr, 1)
-        k = Trim$(CStr(vhstArr(r, 1) & ""))
+        k = Trim$(CStr(vhstArr(r, strCol) & ""))
         If k <> "" Then
-            sp = NormalizeSprintKey(vhstArr(r, 2))
+            sp = NormalizeSprintKey(vhstArr(r, sprintsCol))
             If sp <> "" Then dict(k) = sp
         End If
     Next r
@@ -580,6 +589,7 @@ Public Function BuildSTRMapVHST(vhstArr As Variant) As Object
     Dim dict As Object
     Dim r As Long
     Dim k As String
+    Dim strCol As Long
 
     Set dict = CreateObject("Scripting.Dictionary")
     dict.CompareMode = vbTextCompare
@@ -593,8 +603,14 @@ Public Function BuildSTRMapVHST(vhstArr As Variant) As Object
         Exit Function
     End If
 
+    strCol = FindHeaderColumnInArray(vhstArr, HDR_NOM_STR)
+    If strCol = 0 Then
+        Set BuildSTRMapVHST = dict
+        Exit Function
+    End If
+
     For r = 2 To UBound(vhstArr, 1)
-        k = Trim$(CStr(vhstArr(r, 1) & ""))
+        k = Trim$(CStr(vhstArr(r, strCol) & ""))
         If k <> "" Then
             If Not dict.Exists(k) Then dict(k) = True
         End If
@@ -619,7 +635,7 @@ Public Function BuildFonctionsFromVHST(vhstArr As Variant) As Collection
         If UBound(vhstArr, 1) >= 2 Then
             fonctionsCol = 0
             For c = 1 To UBound(vhstArr, 2)
-                If StrComp(Trim$(CStr(vhstArr(1, c) & "")), "Fonctions", vbTextCompare) = 0 Then
+                If StrComp(Trim$(CStr(vhstArr(1, c) & "")), HDR_FONCTIONS, vbTextCompare) = 0 Then
                     fonctionsCol = c
                     Exit For
                 End If
@@ -661,7 +677,7 @@ Public Function BuildTypeLivrablesFromVHST(vhstArr As Variant) As Collection
         If UBound(vhstArr, 1) >= 2 Then
             typeLivrableCol = 0
             For c = 1 To UBound(vhstArr, 2)
-                If StrComp(Trim$(CStr(vhstArr(1, c) & "")), "Type de livrable", vbTextCompare) = 0 Then
+                If StrComp(Trim$(CStr(vhstArr(1, c) & "")), HDR_TYPE_LIVRABLE, vbTextCompare) = 0 Then
                     typeLivrableCol = c
                     Exit For
                 End If
@@ -705,7 +721,7 @@ Public Sub EnsureDefaultTypeLivrablesInVHST(wsVHST As Worksheet)
     If Not tbl Is Nothing Then
         Set lc = Nothing
         For i = 1 To tbl.ListColumns.Count
-            If StrComp(Trim$(CStr(tbl.ListColumns(i).Name & "")), "Type de livrable", vbTextCompare) = 0 Then
+            If StrComp(Trim$(CStr(tbl.ListColumns(i).Name & "")), HDR_TYPE_LIVRABLE, vbTextCompare) = 0 Then
                 Set lc = tbl.ListColumns(i)
                 Exit For
             End If
@@ -713,7 +729,7 @@ Public Sub EnsureDefaultTypeLivrablesInVHST(wsVHST As Worksheet)
 
         If lc Is Nothing Then
             Set lc = tbl.ListColumns.Add
-            lc.Name = "Type de livrable"
+            lc.Name = HDR_TYPE_LIVRABLE
         End If
 
         Do While tbl.ListRows.Count < 2
@@ -734,7 +750,7 @@ Public Sub EnsureDefaultTypeLivrablesInVHST(wsVHST As Worksheet)
 
     For c = 1 To lastCol
         headerValue = Trim$(CStr(wsVHST.Cells(1, c).Value & ""))
-        If StrComp(headerValue, "Type de livrable", vbTextCompare) = 0 Then
+        If StrComp(headerValue, HDR_TYPE_LIVRABLE, vbTextCompare) = 0 Then
             targetCol = c
             Exit For
         End If
@@ -742,7 +758,7 @@ Public Sub EnsureDefaultTypeLivrablesInVHST(wsVHST As Worksheet)
 
     If targetCol = 0 Then
         targetCol = lastCol + 1
-        wsVHST.Cells(1, targetCol).Value = "Type de livrable"
+        wsVHST.Cells(1, targetCol).Value = HDR_TYPE_LIVRABLE
     End If
 
     lastRow = wsVHST.Cells(wsVHST.Rows.Count, targetCol).End(xlUp).Row
@@ -848,8 +864,14 @@ Private Sub ApplyVHSTMaxSprintUpdates(wsVHST As Worksheet, updates As Object)
     Dim found As Boolean
     Dim u As Variant
     Dim targetRow As Long
+    Dim strCol As Long
+    Dim sprintsCol As Long
 
-    lastRow = wsVHST.Cells(wsVHST.Rows.Count, 1).End(xlUp).Row
+    strCol = FindHeaderColumnInWorksheet(wsVHST, HDR_NOM_STR)
+    sprintsCol = FindHeaderColumnInWorksheet(wsVHST, HDR_SPRINTS)
+    If strCol = 0 Or sprintsCol = 0 Then Exit Sub
+
+    lastRow = wsVHST.Cells(wsVHST.Rows.Count, strCol).End(xlUp).Row
     If lastRow < 2 Then lastRow = 1
 
     For Each u In updates.Keys
@@ -857,8 +879,8 @@ Private Sub ApplyVHSTMaxSprintUpdates(wsVHST As Worksheet, updates As Object)
         found = False
 
         For r = 2 To lastRow
-            If StrComp(Trim$(CStr(wsVHST.Cells(r, 1).Value & "")), k, vbTextCompare) = 0 Then
-                wsVHST.Cells(r, 2).Value = updates(u)
+            If StrComp(Trim$(CStr(wsVHST.Cells(r, strCol).Value & "")), k, vbTextCompare) = 0 Then
+                wsVHST.Cells(r, sprintsCol).Value = updates(u)
                 found = True
                 Exit For
             End If
@@ -867,7 +889,7 @@ Private Sub ApplyVHSTMaxSprintUpdates(wsVHST As Worksheet, updates As Object)
         If Not found Then
             targetRow = 0
             For r = 2 To lastRow
-                If Trim$(CStr(wsVHST.Cells(r, 1).Value & "")) = "" Then
+                If Trim$(CStr(wsVHST.Cells(r, strCol).Value & "")) = "" Then
                     targetRow = r
                     Exit For
                 End If
@@ -878,11 +900,42 @@ Private Sub ApplyVHSTMaxSprintUpdates(wsVHST As Worksheet, updates As Object)
                 targetRow = lastRow
             End If
 
-            wsVHST.Cells(targetRow, 1).Value = u
-            wsVHST.Cells(targetRow, 2).Value = updates(u)
+            wsVHST.Cells(targetRow, strCol).Value = u
+            wsVHST.Cells(targetRow, sprintsCol).Value = updates(u)
         End If
     Next u
 End Sub
+
+Private Function FindHeaderColumnInArray(vArr As Variant, ByVal headerName As String) As Long
+    Dim c As Long
+
+    If IsEmpty(vArr) Then Exit Function
+    If UBound(vArr, 1) < 1 Then Exit Function
+
+    For c = 1 To UBound(vArr, 2)
+        If StrComp(Trim$(CStr(vArr(1, c) & "")), headerName, vbTextCompare) = 0 Then
+            FindHeaderColumnInArray = c
+            Exit Function
+        End If
+    Next c
+End Function
+
+Private Function FindHeaderColumnInWorksheet(ws As Worksheet, ByVal headerName As String) As Long
+    Dim lastCol As Long
+    Dim c As Long
+    Dim headerValue As String
+
+    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+    If lastCol < 1 Then Exit Function
+
+    For c = 1 To lastCol
+        headerValue = Trim$(CStr(ws.Cells(1, c).Value & ""))
+        If StrComp(headerValue, headerName, vbTextCompare) = 0 Then
+            FindHeaderColumnInWorksheet = c
+            Exit Function
+        End If
+    Next c
+End Function
 
 ' Returns numeric sort key for sprint ordering.
 Private Function SprintSortKey(s As String) As Double

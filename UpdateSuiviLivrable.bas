@@ -100,11 +100,11 @@ Public Sub UpdateSuiviLivrable()
     Set typeLivrables = BuildTypeLivrablesFromVHST(vhstArr)
     If fonctions.Count = 0 Then
         Err.Raise vbObjectError + 2001, "UpdateSuiviLivrable", _
-                  "Aucune fonction disponible dans " & SH_VHST & " (colonne 'Fonctions')."
+                  "Aucune fonction disponible dans " & SH_VHST & " (colonne '" & HDR_FONCTIONS & "')."
     End If
     If typeLivrables.Count = 0 Then
         typeLivrableFallbackResp = MsgBox( _
-            "Aucun type livrable disponible dans " & SH_VHST & " (colonne 'Type de livrable')." & vbCrLf & vbCrLf & _
+            "Aucun type livrable disponible dans " & SH_VHST & " (colonne '" & HDR_TYPE_LIVRABLE & "')." & vbCrLf & vbCrLf & _
             "Voulez-vous utiliser les types de livrables par defaut ADL1 et SwDS ?", _
             vbYesNo + vbQuestion, "Mise a jour Suivi")
         If typeLivrableFallbackResp = vbYes Then
@@ -113,7 +113,7 @@ Public Sub UpdateSuiviLivrable()
             Set typeLivrables = BuildTypeLivrablesFromVHST(vhstArr)
         Else
             Err.Raise vbObjectError + 2002, "UpdateSuiviLivrable", _
-                      "Aucun type livrable disponible dans " & SH_VHST & " (colonne 'Type de livrable')."
+                      "Aucun type livrable disponible dans " & SH_VHST & " (colonne '" & HDR_TYPE_LIVRABLE & "')."
         End If
     End If
 

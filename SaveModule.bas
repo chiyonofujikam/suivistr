@@ -30,7 +30,7 @@ Public Sub SaveWorkbookCopyToSelectedDestination()
     Set wsVHST = ThisWorkbook.Worksheets(SH_VHST)
     On Error GoTo ErrHandler
     If Not wsVHST Is Nothing Then
-        poleCol = FindColumnByHeader(wsVHST, "Pole")
+        poleCol = FindColumnByHeader(wsVHST, HDR_POLE)
         If poleCol > 0 Then
             poleValue = Trim$(CStr(wsVHST.Cells(2, poleCol).Value & ""))
         End If
@@ -42,7 +42,7 @@ Public Sub SaveWorkbookCopyToSelectedDestination()
         confirmMsg = "Cette action va sauvegarder un fichier Suivi STR pour le Pole : " & poleLabel & "." & vbCrLf & vbCrLf & _
                      "Voulez-vous continuer ?"
     Else
-        confirmMsg = "Le nom du Pole n'est pas renseigne (colonne 'Pole', ligne 2 de " & SH_VHST & ")." & vbCrLf & vbCrLf & _
+        confirmMsg = "Le nom du Pole n'est pas renseigne (colonne '" & HDR_POLE & "', ligne 2 de " & SH_VHST & ")." & vbCrLf & vbCrLf & _
                      "Cette action va sauvegarder un fichier Suivi STR sans nom de Pole." & vbCrLf & vbCrLf & _
                      "Voulez-vous continuer ?"
     End If
@@ -57,7 +57,7 @@ Public Sub SaveWorkbookCopyToSelectedDestination()
     ClearFunctionsInCopiedWorkbook targetPath
 
     MsgBox "Copie enregistree :" & vbCrLf & targetPath & vbCrLf & vbCrLf & _
-           "Veuillez renseigner manuellement la liste des fonctions dans la colonne 'Fonctions' de " & SH_VHST & " du fichier copie.", _
+           "Veuillez renseigner manuellement la liste des fonctions dans la colonne '" & HDR_FONCTIONS & "' de " & SH_VHST & " du fichier copie.", _
            vbInformation, "Sauvegarde terminee"
     Exit Sub
 
@@ -91,7 +91,7 @@ Private Sub ClearFunctionsInCopiedWorkbook(ByVal copyPath As String)
 
     Set wbCopy = Workbooks.Open(Filename:=copyPath, UpdateLinks:=0, ReadOnly:=False)
     Set wsCopy = wbCopy.Worksheets(SH_VHST)
-    fonctionsCol = FindColumnByHeader(wsCopy, "Fonctions")
+    fonctionsCol = FindColumnByHeader(wsCopy, HDR_FONCTIONS)
 
     If fonctionsCol > 0 Then
         lastRow = wsCopy.Cells(wsCopy.Rows.Count, fonctionsCol).End(xlUp).Row

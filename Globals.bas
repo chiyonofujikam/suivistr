@@ -7,6 +7,14 @@ Public Const SH_EXTRACT    As String = "PowQ_Extract"
 Public Const SH_UVR        As String = "PowQ_Suivi_UVR"
 Public Const SH_VHST       As String = "PowQ_EDU_CE_VHST"
 
+' Header labels used in source sheets.
+Public Const HDR_NOM_STR As String = "Nom_STR"
+Public Const HDR_SPRINTS As String = "Sprints"
+Public Const HDR_FONCTIONS As String = "Fonctions"
+Public Const HDR_TYPE_LIVRABLE As String = "Type de livrable"
+Public Const HDR_POLE As String = "Pole"
+Public Const HDR_FIN_REF As String = "fin ref"
+
 ' First data row indexes per sheet.
 Public Const CR_FIRST_ROW  As Long = 3
 Public Const LIV_FIRST_ROW As Long = 4

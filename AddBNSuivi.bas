@@ -24,6 +24,8 @@ Public Sub AddBNSuivi()
     Dim fonctions As Collection
     Dim fonctionItem As Variant
     Dim addedCount As Long
+    Dim nomStrCol As Long
+    Dim sprintsCol As Long
 
     On Error GoTo CleanFail
 
@@ -35,7 +37,19 @@ Public Sub AddBNSuivi()
     Set wsCR = ThisWorkbook.Worksheets(SH_CR)
     Set wsBN = ThisWorkbook.Worksheets("BN_Suivi dossier Safety")
 
-    lastVHSTRow = GetLastDataRow(wsVHST, COL_A)
+    nomStrCol = FindHeaderColumn(wsVHST, 1, HDR_NOM_STR)
+    If nomStrCol = 0 Then
+        Err.Raise vbObjectError + 3011, "AddBNSuivi", _
+                  "Colonne '" & HDR_NOM_STR & "' introuvable sur la ligne 1 de '" & wsVHST.Name & "'."
+    End If
+
+    sprintsCol = FindHeaderColumn(wsVHST, 1, HDR_SPRINTS)
+    If sprintsCol = 0 Then
+        Err.Raise vbObjectError + 3012, "AddBNSuivi", _
+                  "Colonne '" & HDR_SPRINTS & "' introuvable sur la ligne 1 de '" & wsVHST.Name & "'."
+    End If
+
+    lastVHSTRow = GetLastDataRow(wsVHST, nomStrCol)
     lastCRRow = GetLastDataRow(wsCR, COL_B)
     lastBNRow = wsBN.Cells(wsBN.Rows.Count, COL_B).End(xlUp).Row
     If lastBNRow < 3 Then lastBNRow = 2
@@ -49,10 +63,10 @@ Public Sub AddBNSuivi()
     LoadAllFonctions wsVHST, lastVHSTRow, fonctions
 
     For r = 2 To lastVHSTRow
-        strVal = Trim$(CStr(wsVHST.Cells(r, COL_A).Value))
+        strVal = Trim$(CStr(wsVHST.Cells(r, nomStrCol).Value))
         If strVal <> "" Then
-            If IsNumeric(wsVHST.Cells(r, COL_B).Value) Then
-                maxSprint = CLng(wsVHST.Cells(r, COL_B).Value)
+            If IsNumeric(wsVHST.Cells(r, sprintsCol).Value) Then
+                maxSprint = CLng(wsVHST.Cells(r, sprintsCol).Value)
                 If maxSprint > 0 Then
                     For Each fonctionItem In fonctions
                         For sprintIndex = 1 To maxSprint
@@ -244,12 +258,19 @@ Private Sub LoadAllFonctions(wsVHST As Worksheet, ByVal lastVHSTRow As Long, ByR
     Dim rawFonctions As String
     Dim oneFonctions As Collection
     Dim fonctionItem As Variant
+    Dim fonctionsCol As Long
 
     Set seen = CreateObject("Scripting.Dictionary")
     seen.CompareMode = vbTextCompare
 
+    fonctionsCol = FindHeaderColumn(wsVHST, 1, HDR_FONCTIONS)
+    If fonctionsCol = 0 Then
+        Err.Raise vbObjectError + 3010, "LoadAllFonctions", _
+                  "Colonne '" & HDR_FONCTIONS & "' introuvable sur la ligne 1 de '" & wsVHST.Name & "'."
+    End If
+
     For r = 2 To lastVHSTRow
-        rawFonctions = Trim$(CStr(wsVHST.Cells(r, COL_F).Value))
+        rawFonctions = Trim$(CStr(wsVHST.Cells(r, fonctionsCol).Value))
         If rawFonctions <> "" Then
             Set oneFonctions = SplitFonctions(rawFonctions)
             For Each fonctionItem In oneFonctions
@@ -261,6 +282,23 @@ Private Sub LoadAllFonctions(wsVHST As Worksheet, ByVal lastVHSTRow As Long, ByR
         End If
     Next r
 End Sub
+
+Private Function FindHeaderColumn(ws As Worksheet, ByVal headerRow As Long, ByVal headerName As String) As Long
+    Dim lastCol As Long
+    Dim c As Long
+    Dim cellValue As String
+
+    lastCol = ws.Cells(headerRow, ws.Columns.Count).End(xlToLeft).Column
+    If lastCol < 1 Then Exit Function
+
+    For c = 1 To lastCol
+        cellValue = Trim$(CStr(ws.Cells(headerRow, c).Value))
+        If StrComp(cellValue, headerName, vbTextCompare) = 0 Then
+            FindHeaderColumn = c
+            Exit Function
+        End If
+    Next c
+End Function
 
 Private Sub ApplyBNSuiviRowBorders(wsBN As Worksheet, ByVal rowNum As Long)
     Dim rng As Range
