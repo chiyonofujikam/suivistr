@@ -9,6 +9,7 @@ Public Sub UpdateSuiviLivrable()
     Dim powqArr As Variant
     Dim uvrArr As Variant
     Dim vhstArr As Variant
+    Dim configArr As Variant
     Dim livArr As Variant
     Dim finRefCol As Long
     Dim uvrColMap As Object
@@ -42,11 +43,11 @@ Public Sub UpdateSuiviLivrable()
     Set wsCR = ThisWorkbook.Sheets(SH_CR)
 
     ' Acquire workbook-level lock to avoid concurrent runs.
-    If Trim$(CStr(wsCR.Range("I1").Value & "")) <> "" Then
-        WaitWhileLocked wsCR, "I1"
+    If Trim$(CStr(wsCR.Range(LOCK_CELL_ADDR).Value & "")) <> "" Then
+        WaitWhileLocked wsCR, LOCK_CELL_ADDR
     End If
-    lockValue = "LOCKED by: " & Environ$("USERNAME") & " at " & Format$(Now, "YYYY-MM-DD HH:NN:SS")
-    wsCR.Range("I1").Value = lockValue
+    lockValue = LOCK_PREFIX & Environ$("USERNAME") & LOCK_SEPARATOR & Format$(Now, LOCK_DATE_FORMAT)
+    wsCR.Range(LOCK_CELL_ADDR).Value = lockValue
     lockCreated = True
 
     If wsCR.AutoFilterMode Then wsCR.AutoFilterMode = False
@@ -54,8 +55,8 @@ Public Sub UpdateSuiviLivrable()
         If ThisWorkbook.Sheets(SH_LIV).AutoFilterMode Then ThisWorkbook.Sheets(SH_LIV).AutoFilterMode = False
     End If
 
-    wsCR.Range("I1").Locked = False
-    wsCR.Protect Password:="suivi_update", UserInterfaceOnly:=False
+    wsCR.Range(LOCK_CELL_ADDR).Locked = False
+    wsCR.Protect Password:=PROTECT_PASSWORD, UserInterfaceOnly:=False
 
     On Error Resume Next
     logPath = SHARED_FOLDER_PATH(False)
@@ -68,7 +69,7 @@ Public Sub UpdateSuiviLivrable()
     End If
     On Error GoTo ErrHandler
     If Right$(logPath, 1) <> "\" Then logPath = logPath & "\"
-    logPath = logPath & "error_logs.txt"
+    logPath = logPath & ERROR_LOG_FILE
 
     ' Validate setup and load source arrays.
     ValidateRequiredSheets
@@ -82,6 +83,7 @@ Public Sub UpdateSuiviLivrable()
     powqArr = LoadSheetData(ThisWorkbook.Sheets(SH_EXTRACT))
     uvrArr = LoadSheetData(ThisWorkbook.Sheets(SH_UVR))
     vhstArr = LoadSheetData(ThisWorkbook.Sheets(SH_VHST))
+    configArr = LoadSheetData(ThisWorkbook.Sheets(SH_CONFIG))
     finRefCol = FindFinRefColumn(powqArr)
 
     Call CheckAndOfferUpdateVHSTMaxSprints(ThisWorkbook.Sheets(SH_VHST), crArr, vhstArr)
@@ -96,24 +98,24 @@ Public Sub UpdateSuiviLivrable()
     Set vhstSTRMap = BuildSTRMapVHST(vhstArr)
     Set uvrColMap = BuildUVRColumnMap(wsLiv, uvrArr)
     Set maxSprintMap = BuildMaxSprintMapVHST(vhstArr)
-    Set fonctions = BuildFonctionsFromVHST(vhstArr)
-    Set typeLivrables = BuildTypeLivrablesFromVHST(vhstArr)
+    Set fonctions = BuildFonctionsFromConfig(configArr)
+    Set typeLivrables = BuildTypeLivrablesFromConfig(configArr)
     If fonctions.Count = 0 Then
         Err.Raise vbObjectError + 2001, "UpdateSuiviLivrable", _
-                  "Aucune fonction disponible dans " & SH_VHST & " (colonne '" & HDR_FONCTIONS & "')."
+                  "Aucune fonction disponible dans " & SH_CONFIG & " (colonne '" & HDR_FONCTIONS & "')."
     End If
     If typeLivrables.Count = 0 Then
         typeLivrableFallbackResp = MsgBox( _
-            "Aucun type livrable disponible dans " & SH_VHST & " (colonne '" & HDR_TYPE_LIVRABLE & "')." & vbCrLf & vbCrLf & _
+            "Aucun type livrable disponible dans " & SH_CONFIG & " (colonne '" & HDR_TYPE_LIVRABLE & "')." & vbCrLf & vbCrLf & _
             "Voulez-vous utiliser les types de livrables par defaut ADL1 et SwDS ?", _
             vbYesNo + vbQuestion, "Mise a jour Suivi")
         If typeLivrableFallbackResp = vbYes Then
-            EnsureDefaultTypeLivrablesInVHST ThisWorkbook.Sheets(SH_VHST)
-            vhstArr = LoadSheetData(ThisWorkbook.Sheets(SH_VHST))
-            Set typeLivrables = BuildTypeLivrablesFromVHST(vhstArr)
+            EnsureDefaultTypeLivrablesInConfig ThisWorkbook.Sheets(SH_CONFIG)
+            configArr = LoadSheetData(ThisWorkbook.Sheets(SH_CONFIG))
+            Set typeLivrables = BuildTypeLivrablesFromConfig(configArr)
         Else
             Err.Raise vbObjectError + 2002, "UpdateSuiviLivrable", _
-                      "Aucun type livrable disponible dans " & SH_VHST & " (colonne '" & HDR_TYPE_LIVRABLE & "')."
+                      "Aucun type livrable disponible dans " & SH_CONFIG & " (colonne '" & HDR_TYPE_LIVRABLE & "')."
         End If
     End If
 
@@ -195,7 +197,7 @@ ErrHandler:
 
     On Error Resume Next
     AppendTextFile logPath, _
-        Format$(Now, "YYYY-MM-DD HH:NN:SS") & _
+        Format$(Now, LOCK_DATE_FORMAT) & _
         " | user=" & Environ$("USERNAME") & _
         " | err=" & errNumber & _
         " | src=" & errSource & _
@@ -209,9 +211,9 @@ Cleanup:
     ' Always release lock and restore application settings.
     On Error Resume Next
     If lockCreated Then
-        If Left$(CStr(wsCR.Range("I1").Value & ""), Len("LOCKED by: " & Environ$("USERNAME"))) = "LOCKED by: " & Environ$("USERNAME") Then
-            wsCR.Unprotect Password:="suivi_update"
-            wsCR.Range("I1").ClearContents
+        If Left$(CStr(wsCR.Range(LOCK_CELL_ADDR).Value & ""), Len(LOCK_PREFIX & Environ$("USERNAME"))) = LOCK_PREFIX & Environ$("USERNAME") Then
+            wsCR.Unprotect Password:=PROTECT_PASSWORD
+            wsCR.Range(LOCK_CELL_ADDR).ClearContents
         End If
     End If
     Application.StatusBar = False

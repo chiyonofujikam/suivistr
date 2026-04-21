@@ -34,6 +34,36 @@ ErrH:
     SafeFloor = ""
 End Function
 
+' Converts input value to a Date serial when possible.
+Private Function ParseDateValue(v As Variant) As Variant
+    On Error GoTo ErrH
+
+    If IsZeroOrEmpty(v) Then
+        ParseDateValue = ""
+        Exit Function
+    End If
+
+    If IsDate(v) Then
+        ParseDateValue = CDate(v)
+        Exit Function
+    End If
+
+    If IsNumeric(v) Then
+        If CDbl(v) = 0 Then
+            ParseDateValue = ""
+        Else
+            ParseDateValue = CDate(CDbl(v))
+        End If
+        Exit Function
+    End If
+
+    ParseDateValue = ""
+    Exit Function
+
+ErrH:
+    ParseDateValue = ""
+End Function
+
 ' Parses hour strings like "2h" or "2 heures".
 Private Function ParseHours(v As Variant) As Variant
     If IsZeroOrEmpty(v) Then
@@ -51,6 +81,45 @@ Private Function ParseHours(v As Variant) As Variant
     End If
 End Function
 
+' Normalizes header text for reliable comparisons.
+Private Function NormalizeHeaderText(ByVal s As String) As String
+    s = Replace(s, Chr$(160), " ")
+    s = Replace(s, vbCr, " ")
+    s = Replace(s, vbLf, " ")
+    s = Trim$(s)
+    Do While InStr(s, "  ") > 0
+        s = Replace(s, "  ", " ")
+    Loop
+    NormalizeHeaderText = LCase$(s)
+End Function
+
+' Returns True when UVR destination column is a date field.
+Private Function IsUVRDateColumnIndex(ByVal colIdx As Long) As Boolean
+    Select Case colIdx
+        Case 8, 9, 11, 12, 15, 17, 19 ' H, I, K, L, O, Q, S
+            IsUVRDateColumnIndex = True
+        Case Else
+            IsUVRDateColumnIndex = False
+    End Select
+End Function
+
+' Sanitizes imported UVR values: Excel errors and #N/A become blank.
+Private Function SanitizeUVRImportedValue(ByVal v As Variant) As Variant
+    If IsError(v) Then
+        SanitizeUVRImportedValue = ""
+        Exit Function
+    End If
+
+    If VarType(v) = vbString Then
+        If UCase$(Trim$(CStr(v))) = "#N/A" Then
+            SanitizeUVRImportedValue = ""
+            Exit Function
+        End If
+    End If
+
+    SanitizeUVRImportedValue = v
+End Function
+
 ' Removes brackets and digits from a label.
 Private Function StripBracketsAndDigits(ByVal s As String) As String
     s = Replace(s, "[", "")
@@ -62,19 +131,24 @@ Private Function StripBracketsAndDigits(ByVal s As String) As String
     StripBracketsAndDigits = s
 End Function
 
-' Returns target header row for PowQ_Extract.
-Private Function PowQExtractHeaders() As Variant
-    PowQExtractHeaders = Array( _
-        "Code tache", "str", "Fonction_1", "Pôle_2", "Nom_3", _
-        "Nom simple", "Ressource", "Début_4", "Fin_5", "Travaille", _
-        "% reel", "% théorique", "Début Ref", "Fin Ref", "travail ref", _
-        "Dec", "Raison", "Début précedent", "Fin précédent", "Actif_6", _
-        "Sprint", "Reprise valid", "Valid fonction", "Ressources", "NB CR")
+' Returns True when the sheet contains no values.
+Private Function IsWorksheetEmpty(ByVal ws As Worksheet) As Boolean
+    On Error Resume Next
+    IsWorksheetEmpty = (Application.WorksheetFunction.CountA(ws.Cells) = 0)
+    On Error GoTo 0
+End Function
+
+' Gets worksheet by name and returns True when found.
+Private Function TryGetWorksheet(ByVal wb As Workbook, ByVal sheetName As String, ByRef ws As Worksheet) As Boolean
+    On Error Resume Next
+    Set ws = wb.Worksheets(sheetName)
+    On Error GoTo 0
+    TryGetWorksheet = Not ws Is Nothing
 End Function
 
 
 ' Rebuilds PowQ_Extract from a selected input workbook.
-Sub Update_PowQ_Exract()
+Sub Update_PowQ_Exract(Optional ByVal externalWorkbookPath As String = "", Optional ByVal inputSheetName As String = "")
     Dim inputFilePath As Variant
     Dim wbInput As Workbook
     Dim wsInput As Worksheet
@@ -90,25 +164,32 @@ Sub Update_PowQ_Exract()
     Dim outB As Variant, outC As Variant, outF As Variant
     Dim outG As Variant, outT As Variant, outU As Variant
     Dim tbl As ListObject
+    Dim lo As ListObject
     Dim tblRange As Range
     Dim targetRange As Range
     Dim filtered() As Variant
     Dim filteredCount As Long
     Dim headers As Variant
+    Dim existingTableNames As String
+    Dim userChoice As VbMsgBoxResult
 
-    ' Ask user for the source workbook.
-    inputFilePath = Application.GetOpenFilename( _
-        FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
-        Title:="Sélectionner le fichier d'entrée PowQ")
+    ' Ask user for the source workbook when no external path is provided.
+    If Len(externalWorkbookPath) > 0 Then
+        inputFilePath = externalWorkbookPath
+    Else
+        inputFilePath = Application.GetOpenFilename( _
+            FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
+            Title:="Sélectionner le fichier d'entrée PowQ")
+    End If
 
-    If inputFilePath = False Then Exit Sub
+    If inputFilePath = False Or Len(CStr(inputFilePath)) = 0 Then Exit Sub
 
     On Error Resume Next
-    Set wsOutput = ThisWorkbook.Sheets("PowQ_Extract")
+    Set wsOutput = ThisWorkbook.Sheets(SH_EXTRACT)
     On Error GoTo 0
 
     If wsOutput Is Nothing Then
-        MsgBox "La feuille 'PowQ_Extract' est introuvable dans ce classeur.", vbCritical, "Erreur"
+        MsgBox "La feuille '" & SH_EXTRACT & "' est introuvable dans ce classeur.", vbCritical, "Erreur"
         Exit Sub
     End If
 
@@ -120,12 +201,39 @@ Sub Update_PowQ_Exract()
 
     ' Load source data (columns A:X).
     Set wbInput = Workbooks.Open(CStr(inputFilePath), ReadOnly:=True, UpdateLinks:=0)
-    Set wsInput = wbInput.Sheets(1)
+    If Len(inputSheetName) > 0 Then
+        If Not TryGetWorksheet(wbInput, inputSheetName, wsInput) Then
+            MsgBox "La feuille '" & inputSheetName & "' est introuvable dans le fichier d'entrée.", vbCritical, "Erreur"
+            wbInput.Close False
+            GoTo Cleanup
+        End If
+    Else
+        If wbInput.Worksheets.Count <> 1 Then
+            MsgBox "Le fichier d'entrée doit contenir une seule feuille.", vbExclamation, "Attention"
+            wbInput.Close False
+            GoTo Cleanup
+        End If
+        Set wsInput = wbInput.Sheets(1)
+    End If
+
+    If IsWorksheetEmpty(wsInput) Then
+        If Len(inputSheetName) > 0 Then
+            MsgBox "La feuille source '" & wsInput.Name & "' est vide : la mise à jour PowQ_Extract n'est pas correctement faite.", vbExclamation, "Attention"
+        Else
+            MsgBox "La feuille source du fichier d'entrée est vide : la mise à jour PowQ_Extract n'est pas correctement faite.", vbExclamation, "Attention"
+        End If
+        wbInput.Close False
+        GoTo Cleanup
+    End If
 
     lastRowInput = wsInput.Cells(wsInput.Rows.Count, 1).End(xlUp).Row
 
     If lastRowInput < 2 Then
-        MsgBox "Le fichier d'entrée ne contient pas de données.", vbExclamation, "Attention"
+        If Len(inputSheetName) > 0 Then
+            MsgBox "La feuille source '" & wsInput.Name & "' ne contient pas de données exploitables : la mise à jour PowQ_Extract n'est pas correctement faite.", vbExclamation, "Attention"
+        Else
+            MsgBox "La feuille source du fichier d'entrée ne contient pas de données exploitables : la mise à jour PowQ_Extract n'est pas correctement faite.", vbExclamation, "Attention"
+        End If
         wbInput.Close False
         GoTo Cleanup
     End If
@@ -146,13 +254,13 @@ Sub Update_PowQ_Exract()
         If IsZeroOrEmpty(inp(i, 1)) Then out(i, 5) = "" Else out(i, 5) = inp(i, 1)
         If IsZeroOrEmpty(inp(i, 14)) Then out(i, 6) = "" Else out(i, 6) = inp(i, 14)
         If IsZeroOrEmpty(inp(i, 4)) Then out(i, 7) = "" Else out(i, 7) = inp(i, 4)
-        If IsZeroOrEmpty(inp(i, 5)) Then out(i, 8) = "" Else out(i, 8) = SafeFloor(inp(i, 5))
-        If IsZeroOrEmpty(inp(i, 6)) Then out(i, 9) = "" Else out(i, 9) = SafeFloor(inp(i, 6))
+        out(i, 8) = ParseDateValue(inp(i, 5))
+        out(i, 9) = ParseDateValue(inp(i, 6))
         out(i, 10) = ParseHours(inp(i, 7))
         If IsZeroOrEmpty(inp(i, 9)) Then out(i, 11) = "" Else out(i, 11) = ToNum(inp(i, 9)) * 100
         If IsZeroOrEmpty(inp(i, 8)) Then out(i, 12) = "" Else out(i, 12) = ToNum(inp(i, 8)) * 100
-        If IsZeroOrEmpty(inp(i, 10)) Then out(i, 13) = "" Else out(i, 13) = SafeFloor(inp(i, 10))
-        If IsZeroOrEmpty(inp(i, 11)) Then out(i, 14) = "" Else out(i, 14) = SafeFloor(inp(i, 11))
+        out(i, 13) = ParseDateValue(inp(i, 10))
+        out(i, 14) = ParseDateValue(inp(i, 11))
         out(i, 15) = ParseHours(inp(i, 12))
         If IsZeroOrEmpty(inp(i, 17)) Then out(i, 16) = "" Else out(i, 16) = inp(i, 17)
         If IsZeroOrEmpty(inp(i, 18)) Then out(i, 17) = "" Else out(i, 17) = inp(i, 18)
@@ -227,7 +335,7 @@ SkipRow2:
     Next i
 
     ' Force expected headers/order for PowQ_Extract table.
-    headers = PowQExtractHeaders()
+    headers = GetPowQExtractHeaders()
     For col = 0 To UBound(headers)
         wsOutput.Cells(1, col + 1).Value = headers(col)
     Next col
@@ -241,23 +349,44 @@ SkipRow2:
     wsOutput.Range("A2:Y" & (filteredCount + 1)).Value = filtered
 
     With wsOutput
-        .Range("H2:H" & (filteredCount + 1)).NumberFormat = "0"
-        .Range("I2:I" & (filteredCount + 1)).NumberFormat = "0"
-        .Range("M2:M" & (filteredCount + 1)).NumberFormat = "0"
-        .Range("N2:N" & (filteredCount + 1)).NumberFormat = "0"
+        .Range("H2:H" & (filteredCount + 1)).NumberFormat = "dd/mm/yyyy"
+        .Range("I2:I" & (filteredCount + 1)).NumberFormat = "dd/mm/yyyy"
+        .Range("M2:M" & (filteredCount + 1)).NumberFormat = "dd/mm/yyyy"
+        .Range("N2:N" & (filteredCount + 1)).NumberFormat = "dd/mm/yyyy"
     End With
 
-    ' Recreate output table after removing only Extract_MSP on PowQ_Extract.
+    ' Recreate output table after removing any existing table on PowQ_Extract.
     Set targetRange = wsOutput.Range("A1:Y" & (filteredCount + 1))
 
-    On Error Resume Next
-    Set tbl = wsOutput.ListObjects("Extract_MSP")
-    On Error GoTo ErrHandler
-    If Not tbl Is Nothing Then tbl.Unlist
+    If wsOutput.ListObjects.Count > 0 Then
+        existingTableNames = ""
+        For Each lo In wsOutput.ListObjects
+            If Len(existingTableNames) > 0 Then existingTableNames = existingTableNames & vbCrLf
+            existingTableNames = existingTableNames & "- " & lo.Name
+        Next lo
+
+        userChoice = MsgBox( _
+            "Les tableaux suivants seront supprimés de la feuille '" & SH_EXTRACT & "' :" & vbCrLf & vbCrLf & _
+            existingTableNames & vbCrLf & vbCrLf & _
+            "Continuer et reconstruire le tableau '" & TBL_EXTRACT & "' ?", _
+            vbYesNo + vbExclamation + vbDefaultButton2, _
+            "Confirmation suppression tableaux")
+
+        If userChoice <> vbYes Then
+            MsgBox "Le processus est arrêté. Cette mise à jour ne peut pas fonctionner tant que le tableau n'est pas supprimé " & _
+                   "ou renommé en '" & TBL_EXTRACT & "'.", vbCritical, "Arrêt du traitement"
+            GoTo Cleanup
+        End If
+    End If
+
+    Do While wsOutput.ListObjects.Count > 0
+        Set lo = wsOutput.ListObjects(wsOutput.ListObjects.Count)
+        lo.Unlist
+    Loop
 
     Set tblRange = targetRange
     Set tbl = wsOutput.ListObjects.Add(xlSrcRange, tblRange, , xlYes)
-    tbl.Name = "Extract_MSP"
+    tbl.Name = TBL_EXTRACT
 
     MsgBox "Mise à jour de PowQ_Extract terminée." & vbCrLf & _
            filteredCount & " lignes écrites (" & (dataCount - filteredCount) & " lignes ignorées).", vbInformation, "Terminé"
@@ -274,7 +403,501 @@ Cleanup:
 End Sub
 
 
-' Updates PowQ_Suivi_UVR (placeholder until implemented).
-Sub Update_PowQ_Suivi_UVR()
-    MsgBox "Cette fonctionnalité est encore en cours de développement et n'est pas encore finalisée.", vbExclamation, "En cours de développement"
+' Finds a header in a worksheet and returns its row/column.
+Private Function FindHeaderPosition(ByVal ws As Worksheet, ByVal headerName As String, ByRef headerRow As Long, ByRef headerCol As Long) As Boolean
+    Dim firstCell As Range
+
+    Set firstCell = ws.Cells.Find(What:=headerName, After:=ws.Cells(1, 1), LookIn:=xlValues, LookAt:=xlWhole, _
+                                  SearchOrder:=xlByRows, SearchDirection:=xlNext, MatchCase:=False)
+    If firstCell Is Nothing Then
+        FindHeaderPosition = False
+        Exit Function
+    End If
+
+    headerRow = firstCell.Row
+    headerCol = firstCell.Column
+    FindHeaderPosition = True
+End Function
+
+' Returns the row count below a header until the last non-empty cell.
+Private Function GetColumnDataCount(ByVal ws As Worksheet, ByVal headerRow As Long, ByVal headerCol As Long) As Long
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, headerCol).End(xlUp).Row
+
+    If lastRow <= headerRow Then
+        GetColumnDataCount = 0
+    Else
+        GetColumnDataCount = lastRow - headerRow
+    End If
+End Function
+
+' Returns the target table from PowQ_EDU_CE_VHST sheet.
+Private Function GetEduTable(ByVal ws As Worksheet) As ListObject
+    On Error Resume Next
+    Set GetEduTable = ws.ListObjects("EDU_CE_VHST")
+    On Error GoTo 0
+
+    If GetEduTable Is Nothing Then
+        On Error Resume Next
+        Set GetEduTable = ws.ListObjects("PowQ_EDU_CE_VHST")
+        On Error GoTo 0
+    End If
+
+    If GetEduTable Is Nothing Then
+        If ws.ListObjects.Count > 0 Then
+            Set GetEduTable = ws.ListObjects(1)
+        End If
+    End If
+End Function
+
+' Updates only selected columns in PowQ_EDU_CE_VHST from a selected workbook.
+Sub Update_PowQ_EDU_CE_VHST(Optional ByVal externalWorkbookPath As String = "", Optional ByVal inputSheetName As String = "")
+    Dim inputFilePath As Variant
+    Dim wbInput As Workbook
+    Dim wsInput As Worksheet
+    Dim wsOutput As Worksheet
+    Dim tbl As ListObject
+    Dim requiredHeaders As Variant
+    Dim headerRows() As Long
+    Dim headerCols() As Long
+    Dim colDataCounts() As Long
+    Dim headerRowRef As Long
+    Dim tableRowCount As Long
+    Dim rowsToCopy As Long
+    Dim sourceCount As Long
+    Dim ignoredRows As Long
+    Dim i As Long
+    Dim r As Long
+    Dim outCol As Long
+    Dim rngTarget As Range
+    Dim srcData As Variant
+    Dim tgtData As Variant
+
+    requiredHeaders = GetPowQEduHeaders()
+    ReDim headerRows(LBound(requiredHeaders) To UBound(requiredHeaders))
+    ReDim headerCols(LBound(requiredHeaders) To UBound(requiredHeaders))
+    ReDim colDataCounts(LBound(requiredHeaders) To UBound(requiredHeaders))
+
+    If Len(externalWorkbookPath) > 0 Then
+        inputFilePath = externalWorkbookPath
+    Else
+        inputFilePath = Application.GetOpenFilename( _
+            FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
+            Title:="Sélectionner le fichier d'entrée EDU_CE_VHST")
+    End If
+
+    If inputFilePath = False Then Exit Sub
+
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets(SH_VHST)
+    On Error GoTo 0
+    If wsOutput Is Nothing Then
+        MsgBox "La feuille '" & SH_VHST & "' est introuvable dans ce classeur.", vbCritical, "Erreur"
+        Exit Sub
+    End If
+
+    Set tbl = GetEduTable(wsOutput)
+    If tbl Is Nothing Then
+        MsgBox "Aucun tableau n'a été trouvé sur la feuille '" & SH_VHST & "'.", vbCritical, "Erreur"
+        Exit Sub
+    End If
+    If tbl.DataBodyRange Is Nothing Then
+        MsgBox "Le tableau de la feuille '" & SH_VHST & "' ne contient aucune ligne.", vbExclamation, "Attention"
+        Exit Sub
+    End If
+
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+
+    On Error GoTo ErrHandler
+
+    Set wbInput = Workbooks.Open(CStr(inputFilePath), ReadOnly:=True, UpdateLinks:=0)
+    If Len(inputSheetName) > 0 Then
+        If Not TryGetWorksheet(wbInput, inputSheetName, wsInput) Then
+            MsgBox "La feuille '" & inputSheetName & "' est introuvable dans le fichier d'entrée.", vbCritical, "Erreur"
+            wbInput.Close False
+            GoTo Cleanup
+        End If
+    Else
+        If Not TryGetWorksheet(wbInput, SH_IN_VHST_REF, wsInput) Then
+            MsgBox "La feuille '" & SH_IN_VHST_REF & "' est introuvable dans le fichier d'entrée.", vbCritical, "Erreur"
+            wbInput.Close False
+            GoTo Cleanup
+        End If
+    End If
+
+    If IsWorksheetEmpty(wsInput) Then
+        If Len(inputSheetName) > 0 Then
+            MsgBox "La feuille source '" & wsInput.Name & "' est vide : la mise à jour " & SH_VHST & " n'est pas correctement faite.", vbExclamation, "Attention"
+        Else
+            MsgBox "La feuille source du fichier d'entrée est vide : la mise à jour " & SH_VHST & " n'est pas correctement faite.", vbExclamation, "Attention"
+        End If
+        wbInput.Close False
+        GoTo Cleanup
+    End If
+
+    headerRowRef = -1
+    For i = LBound(requiredHeaders) To UBound(requiredHeaders)
+        If Not FindHeaderPosition(wsInput, CStr(requiredHeaders(i)), headerRows(i), headerCols(i)) Then
+            MsgBox "Colonne obligatoire introuvable dans le fichier d'entrée : " & CStr(requiredHeaders(i)), vbCritical, "Erreur"
+            wbInput.Close False
+            GoTo Cleanup
+        End If
+
+        If headerRowRef = -1 Then
+            headerRowRef = headerRows(i)
+        ElseIf headerRows(i) <> headerRowRef Then
+            MsgBox "Les en-têtes requis ne sont pas sur la même ligne dans le fichier d'entrée.", vbCritical, "Erreur"
+            wbInput.Close False
+            GoTo Cleanup
+        End If
+
+        colDataCounts(i) = GetColumnDataCount(wsInput, headerRows(i), headerCols(i))
+    Next i
+
+    tableRowCount = tbl.ListRows.Count
+
+    For i = LBound(requiredHeaders) To UBound(requiredHeaders)
+        On Error Resume Next
+        outCol = tbl.ListColumns(CStr(requiredHeaders(i))).Index
+        On Error GoTo ErrHandler
+        If outCol = 0 Then
+            MsgBox "La colonne '" & CStr(requiredHeaders(i)) & "' est absente du tableau de sortie.", vbCritical, "Erreur"
+            wbInput.Close False
+            GoTo Cleanup
+        End If
+
+        Set rngTarget = tbl.ListColumns(outCol).DataBodyRange
+
+        sourceCount = colDataCounts(i)
+        ignoredRows = 0
+
+        ReDim tgtData(1 To tableRowCount, 1 To 1)
+        If sourceCount > 0 Then
+            srcData = wsInput.Range(wsInput.Cells(headerRows(i) + 1, headerCols(i)), wsInput.Cells(headerRows(i) + sourceCount, headerCols(i))).Value
+            rowsToCopy = sourceCount
+            If rowsToCopy > tableRowCount Then
+                rowsToCopy = tableRowCount
+                ignoredRows = sourceCount - tableRowCount
+            End If
+
+            For r = 1 To rowsToCopy
+                tgtData(r, 1) = srcData(r, 1)
+            Next r
+        End If
+
+        ' Fill remaining rows with blanks when source column is shorter.
+        If rowsToCopy < tableRowCount Then
+            For r = rowsToCopy + 1 To tableRowCount
+                tgtData(r, 1) = ""
+            Next r
+        End If
+
+        rngTarget.Value = tgtData
+
+        If ignoredRows > 0 Then
+            MsgBox "La colonne '" & CStr(requiredHeaders(i)) & "' contient " & sourceCount & _
+                   " lignes dans le fichier d'entrée." & vbCrLf & _
+                   ignoredRows & " ligne(s) ont été ignorée(s) car le tableau de destination contient " & tableRowCount & " lignes.", _
+                   vbExclamation, "Attention - Lignes ignorées"
+        End If
+
+        outCol = 0
+        rowsToCopy = 0
+    Next i
+
+    wbInput.Close False
+    Set wbInput = Nothing
+
+    MsgBox "Mise à jour de PowQ_EDU_CE_VHST terminée." & vbCrLf & _
+           "Colonnes mises à jour : Nom_STR, Sprint, Collaborateurs, Sociétés, Info_Complet.", vbInformation, "Terminé"
+    GoTo Cleanup
+
+ErrHandler:
+    MsgBox "Une erreur s'est produite : " & Err.Description, vbCritical, "Erreur"
+    If Not wbInput Is Nothing Then wbInput.Close False
+
+Cleanup:
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
+End Sub
+
+
+Sub Update_PowQ_Suivi_UVR(Optional ByVal externalWorkbookPath As String = "", Optional ByVal inputSheetName As String = "")
+    Dim inputFilePath As Variant
+    Dim wbInput As Workbook
+    Dim wb As Workbook
+    Dim wsInput As Worksheet
+    Dim wsOutput As Worksheet
+    Dim openedWindow As Window
+    Dim wasAlreadyOpen As Boolean
+    Dim tbl As ListObject
+    Dim lo As ListObject
+    Dim existingTableNames As String
+    Dim userChoice As VbMsgBoxResult
+    Dim requiredHeaders As Variant
+    Dim srcHeaderCols() As Long
+    Dim outData() As Variant
+    Dim sourceData As Variant
+    Dim targetRange As Range
+    Dim tblRange As Range
+    Dim firstDataRow As Long
+    Dim headerRow As Long
+    Dim dataLastRow As Long
+    Dim rowCount As Long
+    Dim colCount As Long
+    Dim i As Long
+    Dim r As Long
+    Dim srcCol As Long
+    Dim outHeader As String
+    Dim foundHeader As Range
+    Dim headerColMap As Object
+    Dim headerKey As String
+    Dim c As Long
+    Dim useInputHeaders As Boolean
+    Dim targetTableName As String
+    Dim availableHeaders As String
+
+    targetTableName = TBL_UVR
+    headerRow = UVR_HEADER_ROW
+    firstDataRow = UVR_FIRST_DATA_ROW
+
+    If Len(externalWorkbookPath) > 0 Then
+        inputFilePath = externalWorkbookPath
+    Else
+        inputFilePath = Application.GetOpenFilename( _
+            FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
+            Title:="Sélectionner le fichier d'entrée UVR")
+    End If
+
+    If inputFilePath = False Or Len(CStr(inputFilePath)) = 0 Then Exit Sub
+
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets(SH_UVR)
+    On Error GoTo 0
+    If wsOutput Is Nothing Then
+        MsgBox "La feuille '" & SH_UVR & "' est introuvable dans ce classeur.", vbCritical, "Erreur"
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    Set tbl = wsOutput.ListObjects(targetTableName)
+    On Error GoTo 0
+
+    If tbl Is Nothing Then
+        If wsOutput.ListObjects.Count = 0 Then
+            useInputHeaders = True
+        Else
+            existingTableNames = ""
+            For Each lo In wsOutput.ListObjects
+                If Len(existingTableNames) > 0 Then existingTableNames = existingTableNames & vbCrLf
+                existingTableNames = existingTableNames & "- " & lo.Name
+            Next lo
+
+            userChoice = MsgBox( _
+                "Le tableau '" & targetTableName & "' est introuvable sur '" & SH_UVR & "'." & vbCrLf & vbCrLf & _
+                "Tableau(x) trouvé(s) :" & vbCrLf & existingTableNames & vbCrLf & vbCrLf & _
+                "Voulez-vous supprimer ces tableaux et créer '" & targetTableName & "' ?", _
+                vbYesNo + vbExclamation + vbDefaultButton2, _
+                "Confirmation suppression tableaux")
+
+            If userChoice <> vbYes Then
+                MsgBox "Le processus est arrêté. Cette mise à jour ne fonctionnera pas tant que le tableau n'est pas supprimé " & _
+                       "ou renommé en '" & targetTableName & "'.", vbCritical, "Arrêt du traitement"
+                Exit Sub
+            End If
+
+            Set tbl = wsOutput.ListObjects(1)
+        End If
+    End If
+
+    If Not tbl Is Nothing Then
+        colCount = tbl.ListColumns.Count
+        ReDim requiredHeaders(1 To colCount)
+        For i = 1 To colCount
+            requiredHeaders(i) = CStr(tbl.ListColumns(i).Name)
+        Next i
+    End If
+
+    On Error GoTo ErrHandler
+    wasAlreadyOpen = False
+    For Each wb In Workbooks
+        If StrComp(CStr(wb.FullName), CStr(inputFilePath), vbTextCompare) = 0 Then
+            Set wbInput = wb
+            wasAlreadyOpen = True
+            Exit For
+        End If
+    Next wb
+
+    If wbInput Is Nothing Then
+        Set wbInput = Workbooks.Open(CStr(inputFilePath), ReadOnly:=True, UpdateLinks:=0)
+        On Error Resume Next
+        Set openedWindow = wbInput.Windows(1)
+        If Not openedWindow Is Nothing Then openedWindow.Visible = False
+        On Error GoTo ErrHandler
+    End If
+
+    If Not TryGetWorksheet(wbInput, SH_IN_UVR, wsInput) Then
+        MsgBox "La feuille '" & SH_IN_UVR & "' est introuvable dans le fichier d'entrée.", vbCritical, "Erreur"
+        If Not wasAlreadyOpen Then wbInput.Close False
+        Exit Sub
+    End If
+
+    If IsWorksheetEmpty(wsInput) Then
+        MsgBox "La feuille source '" & wsInput.Name & "' est vide : la mise à jour " & SH_UVR & " n'est pas correctement faite.", vbExclamation, "Attention"
+        If Not wasAlreadyOpen Then wbInput.Close False
+        Exit Sub
+    End If
+
+    Set headerColMap = CreateObject("Scripting.Dictionary")
+    headerColMap.CompareMode = vbTextCompare
+    For c = 1 To 23 ' A:W
+        headerKey = NormalizeHeaderText(CStr(wsInput.Cells(headerRow, c).Value2 & ""))
+        If Len(headerKey) > 0 Then
+            If Not headerColMap.Exists(headerKey) Then
+                headerColMap.Add headerKey, c
+            End If
+        End If
+    Next c
+
+    If useInputHeaders Then
+        colCount = 0
+        For c = 1 To 23 ' A:W
+            If Len(Trim$(CStr(wsInput.Cells(headerRow, c).Value2 & ""))) > 0 Then
+                colCount = colCount + 1
+            End If
+        Next c
+        If colCount = 0 Then
+            MsgBox "La feuille '" & SH_IN_UVR & "' ne contient aucun en-tête exploitable sur A:W (ligne " & headerRow & ").", vbCritical, "Erreur"
+            If Not wasAlreadyOpen Then wbInput.Close False
+            Exit Sub
+        End If
+        ReDim requiredHeaders(1 To colCount)
+        i = 0
+        For c = 1 To 23 ' A:W
+            outHeader = Trim$(CStr(wsInput.Cells(headerRow, c).Value2 & ""))
+            If Len(outHeader) > 0 Then
+                i = i + 1
+                requiredHeaders(i) = outHeader
+            End If
+        Next c
+    End If
+
+    ReDim srcHeaderCols(1 To colCount)
+    availableHeaders = ""
+    For i = 1 To colCount
+        outHeader = CStr(requiredHeaders(i))
+        headerKey = NormalizeHeaderText(outHeader)
+        If Not headerColMap.Exists(headerKey) Then
+            MsgBox "Le fichier source (feuille '" & SH_IN_UVR & "') n'a pas les mêmes colonnes que le tableau '" & _
+                   targetTableName & "' de '" & SH_UVR & "'." & vbCrLf & _
+                   "Colonne manquante : " & outHeader, vbCritical, "Erreur de correspondance colonnes"
+            If Not wasAlreadyOpen Then wbInput.Close False
+            Exit Sub
+        End If
+        srcHeaderCols(i) = CLng(headerColMap(headerKey))
+        If Len(availableHeaders) > 0 Then availableHeaders = availableHeaders & ", "
+        availableHeaders = availableHeaders & outHeader
+    Next i
+
+    dataLastRow = headerRow
+    For i = 1 To colCount
+        srcCol = srcHeaderCols(i)
+        r = wsInput.Cells(wsInput.Rows.Count, srcCol).End(xlUp).Row
+        If r > dataLastRow Then dataLastRow = r
+    Next i
+
+    If dataLastRow < firstDataRow Then
+        rowCount = 0
+    Else
+        rowCount = dataLastRow - firstDataRow + 1
+    End If
+
+    If rowCount > 0 Then
+        ReDim outData(1 To rowCount, 1 To colCount)
+        For i = 1 To colCount
+            srcCol = srcHeaderCols(i)
+            sourceData = wsInput.Range(wsInput.Cells(firstDataRow, srcCol), wsInput.Cells(dataLastRow, srcCol)).Value2
+            For r = 1 To rowCount
+                sourceData(r, 1) = SanitizeUVRImportedValue(sourceData(r, 1))
+                If IsUVRDateColumnIndex(i) Then
+                    outData(r, i) = ParseDateValue(sourceData(r, 1))
+                Else
+                    outData(r, i) = sourceData(r, 1)
+                End If
+            Next r
+        Next i
+    End If
+
+    If Not wasAlreadyOpen Then wbInput.Close False
+    Set wbInput = Nothing
+
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+
+    If userChoice = vbYes Then
+        Do While wsOutput.ListObjects.Count > 0
+            Set lo = wsOutput.ListObjects(wsOutput.ListObjects.Count)
+            lo.Unlist
+        Loop
+    ElseIf Not tbl Is Nothing Then
+        tbl.Unlist
+    End If
+
+    wsOutput.Cells.ClearContents
+
+    For i = 1 To colCount
+        wsOutput.Cells(1, i).Value = requiredHeaders(i)
+    Next i
+
+    If rowCount > 0 Then
+        wsOutput.Range(wsOutput.Cells(2, 1), wsOutput.Cells(rowCount + 1, colCount)).Value2 = outData
+        wsOutput.Range("H2:H" & (rowCount + 1)).NumberFormat = "dd/mm/yyyy"
+        wsOutput.Range("I2:I" & (rowCount + 1)).NumberFormat = "dd/mm/yyyy"
+        wsOutput.Range("K2:K" & (rowCount + 1)).NumberFormat = "dd/mm/yyyy"
+        wsOutput.Range("L2:L" & (rowCount + 1)).NumberFormat = "dd/mm/yyyy"
+        wsOutput.Range("O2:O" & (rowCount + 1)).NumberFormat = "dd/mm/yyyy"
+        wsOutput.Range("Q2:Q" & (rowCount + 1)).NumberFormat = "dd/mm/yyyy"
+        wsOutput.Range("S2:S" & (rowCount + 1)).NumberFormat = "dd/mm/yyyy"
+        Set targetRange = wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(rowCount + 1, colCount))
+    Else
+        Set targetRange = wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(1, colCount))
+    End If
+
+    Set tblRange = targetRange
+    Set tbl = wsOutput.ListObjects.Add(xlSrcRange, tblRange, , xlYes)
+    tbl.Name = targetTableName
+
+    MsgBox "Mise à jour de " & SH_UVR & " terminée depuis la feuille '" & SH_IN_UVR & "'." & vbCrLf & _
+           rowCount & " ligne(s) chargée(s).", vbInformation, "Terminé"
+    GoTo Cleanup
+
+ErrHandler:
+    MsgBox "Une erreur s'est produite : " & Err.Description, vbCritical, "Erreur"
+    If Not wbInput Is Nothing Then
+        If Not wasAlreadyOpen Then wbInput.Close False
+    End If
+
+Cleanup:
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
+End Sub
+
+' Runs all PowQ updates from one selected workbook.
+Sub Update_PowQ_All()
+    Dim inputFilePath As Variant
+
+    inputFilePath = Application.GetOpenFilename( _
+        FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
+        Title:="Sélectionner le fichier d'entrée PowQ (3 feuilles)")
+
+    If inputFilePath = False Then Exit Sub
+
+    Update_PowQ_EDU_CE_VHST CStr(inputFilePath), SH_IN_VHST
+    Update_PowQ_Exract CStr(inputFilePath), SH_IN_EXTRACT
+    Update_PowQ_Suivi_UVR CStr(inputFilePath), SH_IN_UVR
 End Sub

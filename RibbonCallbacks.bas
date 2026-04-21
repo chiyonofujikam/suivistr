@@ -27,22 +27,22 @@ End Sub
 
 ' Ribbon callback for PowQ EDU_CE_VHST button.
 Public Sub Ribbon_PowQEDUCEVHST(ByVal control As Object)
-    MsgBox "Cette fonctionnalite est en cours de developpement.", vbExclamation, "En cours de developpement"
+    RunMacroSafe "PowQ EDU_CE_VHST", "Update_PowQ_EDU_CE_VHST", "PowQUpdate.Update_PowQ_EDU_CE_VHST"
 End Sub
 
 ' Ribbon callback for PowQ 'all' button (runs all PowQ actions - en cours de dev).
 Public Sub Ribbon_PowQAll(ByVal control As Object)
-    MsgBox "Cette fonctionnalite est en cours de developpement.", vbExclamation, "En cours de developpement"
+    RunMacroSafe "PowQ Tout", "Update_PowQ_All", "PowQUpdate.Update_PowQ_All"
 End Sub
 
 ' Ribbon callback for BN_Suivi button.
 Public Sub Ribbon_AddBNSuivi(ByVal control As Object)
-    RunMacroSafe "BN_Suivi dossier Safety", "AddBNSuivi", "AddBNSuivi.AddBNSuivi"
+    RunMacroSafe SH_BN, "AddBNSuivi", "AddBNSuivi.AddBNSuivi"
 End Sub
 
 ' Ribbon callback for BN_Suivi archive button.
 Public Sub Ribbon_ArchiveBNSuivi(ByVal control As Object)
-    RunMacroSafe "Archivage BN_Suivi dossier Safety", "ArchiveBNSuivi", "ArchiveBNSuivi.ArchiveBNSuivi"
+    RunMacroSafe "Archivage " & SH_BN, "ArchiveBNSuivi", "ArchiveBNSuivi.ArchiveBNSuivi"
 End Sub
 
 ' Runs macro names safely using workbook-qualified then global lookup.

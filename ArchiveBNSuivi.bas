@@ -29,12 +29,12 @@ Public Sub ArchiveBNSuivi()
 
     On Error GoTo ErrHandler
 
-    If Not SheetExists("BN_Suivi dossier Safety") Then
-        MsgBox "La feuille ""BN_Suivi dossier Safety"" est introuvable.", vbExclamation
+    If Not SheetExists(SH_BN) Then
+        MsgBox "La feuille """ & SH_BN & """ est introuvable.", vbExclamation
         Exit Sub
     End If
 
-    confirmResp = MsgBox("Confirmer l'archivage de ""BN_Suivi dossier Safety"" ?" & vbCrLf & vbCrLf & _
+    confirmResp = MsgBox("Confirmer l'archivage de """ & SH_BN & """ ?" & vbCrLf & vbCrLf & _
                          "Cette action va sauvegarder l'etat actuel puis vider toutes les lignes.", _
                          vbYesNo + vbQuestion + vbDefaultButton2, "Confirmation archivage")
     If confirmResp <> vbYes Then GoTo Cleanup
@@ -51,24 +51,24 @@ Public Sub ArchiveBNSuivi()
     On Error GoTo ErrHandler
     If Right$(sharedFolderPath, 1) <> "\" Then sharedFolderPath = sharedFolderPath & "\"
 
-    folderPath = sharedFolderPath & "Archived\"
+    folderPath = sharedFolderPath & ARCHIVE_ROOT_FOLDER
     If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
 
-    folderPath = folderPath & "BN_Suivi\"
+    folderPath = folderPath & ARCHIVE_BN_FOLDER
     If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
 
-    dayFolder = folderPath & Format$(Date, "DDMMYYYY") & "\"
+    dayFolder = folderPath & Format$(Date, DATE_FOLDER_FORMAT) & "\"
     If Dir$(dayFolder, vbDirectory) = "" Then MkDir dayFolder
 
-    ts = Format$(Now, "DDMMYYYY_HHMMSS")
-    fileName = "BN_Suivi_dossier_Safety_" & ts & ".xlsx"
+    ts = Format$(Now, TS_FILE_FORMAT)
+    fileName = BN_ARCHIVE_FILE_PREFIX & ts & ".xlsx"
     fullPath = dayFolder & fileName
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
     Application.EnableEvents = False
 
-    Set wsBN = ThisWorkbook.Sheets("BN_Suivi dossier Safety")
+    Set wsBN = ThisWorkbook.Sheets(SH_BN)
     If wsBN.AutoFilterMode Then wsBN.AutoFilterMode = False
 
     Set wbNew = Workbooks.Add(xlWBATWorksheet)
@@ -106,8 +106,8 @@ Public Sub ArchiveBNSuivi()
     wbNew.Close SaveChanges:=False
 
     lastRow = wsBN.Cells(wsBN.Rows.Count, COL_B).End(xlUp).Row
-    If lastRow > 2 Then
-        wsBN.Rows("3:" & lastRow).Delete Shift:=xlUp
+    If lastRow > DATA_ROW_2 Then
+        wsBN.Rows(CStr(DATA_ROW_3) & ":" & lastRow).Delete Shift:=xlUp
     End If
 
     resp = MsgBox("Archive BN_Suivi enregistree et feuille reinitialisee." & vbCrLf & vbCrLf & _
@@ -125,14 +125,14 @@ Cleanup:
     Exit Sub
 
 ErrHandler:
-    errLine = Format$(Now, "YYYY-MM-DD HH:NN:SS") & _
+    errLine = Format$(Now, LOCK_DATE_FORMAT) & _
               " | user=" & Environ$("USERNAME") & _
               " | proc=ArchiveBNSuivi" & _
               " | err=" & Err.Number & _
               " | " & Err.Description
     On Error Resume Next
     If Trim$(sharedFolderPath) <> "" Then
-        AppendTextFile sharedFolderPath & "error_logs.txt", errLine
+        AppendTextFile sharedFolderPath & ERROR_LOG_FILE, errLine
     End If
     Application.EnableEvents = True
     Application.DisplayAlerts = True

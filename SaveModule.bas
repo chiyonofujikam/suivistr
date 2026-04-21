@@ -2,7 +2,7 @@ Option Explicit
 
 ' Saves current workbook, then saves a copy to a selected folder.
 Public Sub SaveWorkbookCopyToSelectedDestination()
-    Dim wsVHST As Worksheet
+    Dim wsConfig As Worksheet
     Dim folderPath As String
     Dim poleValue As String
     Dim poleLabel As String
@@ -15,7 +15,7 @@ Public Sub SaveWorkbookCopyToSelectedDestination()
 
     On Error GoTo ErrHandler
 
-    Set dlg = Application.FileDialog(4) ' msoFileDialogFolderPicker
+    Set dlg = Application.FileDialog(FILE_DIALOG_FOLDER_PICKER)
     With dlg
         .Title = "Selectionner le dossier de destination pour la copie"
         .AllowMultiSelect = False
@@ -27,12 +27,12 @@ Public Sub SaveWorkbookCopyToSelectedDestination()
 
     poleValue = ""
     On Error Resume Next
-    Set wsVHST = ThisWorkbook.Worksheets(SH_VHST)
+    Set wsConfig = ThisWorkbook.Worksheets(SH_CONFIG)
     On Error GoTo ErrHandler
-    If Not wsVHST Is Nothing Then
-        poleCol = FindColumnByHeader(wsVHST, HDR_POLE)
+    If Not wsConfig Is Nothing Then
+        poleCol = FindColumnByHeader(wsConfig, HDR_POLE)
         If poleCol > 0 Then
-            poleValue = Trim$(CStr(wsVHST.Cells(2, poleCol).Value & ""))
+            poleValue = Trim$(CStr(wsConfig.Cells(DATA_ROW_2, poleCol).Value & ""))
         End If
     End If
     poleLabel = poleValue
@@ -42,7 +42,7 @@ Public Sub SaveWorkbookCopyToSelectedDestination()
         confirmMsg = "Cette action va sauvegarder un fichier Suivi STR pour le Pole : " & poleLabel & "." & vbCrLf & vbCrLf & _
                      "Voulez-vous continuer ?"
     Else
-        confirmMsg = "Le nom du Pole n'est pas renseigne (colonne '" & HDR_POLE & "', ligne 2 de " & SH_VHST & ")." & vbCrLf & vbCrLf & _
+        confirmMsg = "Le nom du Pole n'est pas renseigne (colonne '" & HDR_POLE & "', ligne " & DATA_ROW_2 & " de " & SH_CONFIG & ")." & vbCrLf & vbCrLf & _
                      "Cette action va sauvegarder un fichier Suivi STR sans nom de Pole." & vbCrLf & vbCrLf & _
                      "Voulez-vous continuer ?"
     End If
@@ -57,7 +57,7 @@ Public Sub SaveWorkbookCopyToSelectedDestination()
     ClearFunctionsInCopiedWorkbook targetPath
 
     MsgBox "Copie enregistree :" & vbCrLf & targetPath & vbCrLf & vbCrLf & _
-           "Veuillez renseigner manuellement la liste des fonctions dans la colonne '" & HDR_FONCTIONS & "' de " & SH_VHST & " du fichier copie.", _
+           "Veuillez renseigner manuellement la liste des fonctions dans la colonne '" & HDR_FONCTIONS & "' de " & SH_CONFIG & " du fichier copie.", _
            vbInformation, "Sauvegarde terminee"
     Exit Sub
 
@@ -90,13 +90,13 @@ Private Sub ClearFunctionsInCopiedWorkbook(ByVal copyPath As String)
     Dim lastRow As Long
 
     Set wbCopy = Workbooks.Open(Filename:=copyPath, UpdateLinks:=0, ReadOnly:=False)
-    Set wsCopy = wbCopy.Worksheets(SH_VHST)
+    Set wsCopy = wbCopy.Worksheets(SH_CONFIG)
     fonctionsCol = FindColumnByHeader(wsCopy, HDR_FONCTIONS)
 
     If fonctionsCol > 0 Then
         lastRow = wsCopy.Cells(wsCopy.Rows.Count, fonctionsCol).End(xlUp).Row
-        If lastRow < 2 Then lastRow = 2
-        wsCopy.Range(wsCopy.Cells(2, fonctionsCol), wsCopy.Cells(lastRow, fonctionsCol)).ClearContents
+        If lastRow < DATA_ROW_2 Then lastRow = DATA_ROW_2
+        wsCopy.Range(wsCopy.Cells(DATA_ROW_2, fonctionsCol), wsCopy.Cells(lastRow, fonctionsCol)).ClearContents
     End If
 
     wbCopy.Save

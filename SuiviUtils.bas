@@ -18,7 +18,7 @@ Public Function SHARED_FOLDER_PATH(Optional ByVal raiseIfMissing As Boolean = Tr
         Exit Function
     End If
 
-    Set dlg = Application.FileDialog(4)
+    Set dlg = Application.FileDialog(FILE_DIALOG_FOLDER_PICKER)
     With dlg
         .Title = "Select the shared folder for Suivi files (Archived\, error_logs.txt)"
         .ButtonName = "Select"
@@ -49,7 +49,7 @@ Public Sub ValidateRequiredSheets()
     Dim found As Boolean
     Dim sheetList As String
 
-    names = Array(SH_CR, SH_LIV, SH_EXTRACT, SH_VHST)
+    names = Array(SH_CR, SH_LIV, SH_EXTRACT, SH_VHST, SH_CONFIG)
     missing = ""
 
     For i = LBound(names) To UBound(names)
@@ -92,14 +92,13 @@ Public Sub WaitWhileLocked(wsCR As Worksheet, ByVal lockCell As String)
     Dim lockDate As Date
     Dim lockAgeMinutes As Double
     Dim resp As VbMsgBoxResult
-    Const STALE_LOCK_MINUTES As Double = 30#
 
     lockInfo = CStr(wsCR.Range(lockCell).Value & "")
     ParseLockInfo lockInfo, lockUser, lockStartedAt
 
     If TryParseLockDateTime(lockStartedAt, lockDate) Then
         lockAgeMinutes = DateDiff("s", lockDate, Now) / 60#
-        If lockAgeMinutes >= STALE_LOCK_MINUTES Then
+        If lockAgeMinutes >= LOCK_STALE_MINUTES Then
             resp = MsgBox("Une mise a jour est indiquee en cours depuis " & Format$(lockDate, "dd/mm/yyyy hh:nn:ss") & "." & vbCrLf & vbCrLf & _
                           "Utilisateur : " & lockUser & vbCrLf & _
                           "Duree du verrou : " & Format$(lockAgeMinutes, "0") & " minute(s)" & vbCrLf & vbCrLf & _
@@ -107,7 +106,7 @@ Public Sub WaitWhileLocked(wsCR As Worksheet, ByVal lockCell As String)
                           vbYesNo + vbExclamation, "Verrou potentiellement bloque")
             If resp = vbYes Then
                 On Error Resume Next
-                wsCR.Unprotect Password:="suivi_update"
+                wsCR.Unprotect Password:=PROTECT_PASSWORD
                 wsCR.Range(lockCell).ClearContents
                 On Error GoTo 0
                 Exit Sub
@@ -162,15 +161,15 @@ Private Sub ParseLockInfo(lockInfo As String, ByRef lockUser As String, ByRef lo
     s = Trim$(Replace(lockInfo, vbCr, ""))
     If s = "" Then Exit Sub
 
-    pBy = InStr(1, s, "LOCKED by:", vbTextCompare)
+    pBy = InStr(1, s, LOCK_PREFIX, vbTextCompare)
     If pBy = 0 Then Exit Sub
 
-    pAt = InStr(pBy + Len("LOCKED by:"), s, " at ", vbTextCompare)
+    pAt = InStr(pBy + Len(LOCK_PREFIX), s, LOCK_SEPARATOR, vbTextCompare)
     If pAt > 0 Then
-        lockUser = Trim$(Mid$(s, pBy + Len("LOCKED by:"), pAt - (pBy + Len("LOCKED by:"))))
-        lockStartedAt = Trim$(Mid$(s, pAt + Len(" at ")))
+        lockUser = Trim$(Mid$(s, pBy + Len(LOCK_PREFIX), pAt - (pBy + Len(LOCK_PREFIX))))
+        lockStartedAt = Trim$(Mid$(s, pAt + Len(LOCK_SEPARATOR)))
     Else
-        lockUser = Trim$(Mid$(s, pBy + Len("LOCKED by:")))
+        lockUser = Trim$(Mid$(s, pBy + Len(LOCK_PREFIX)))
     End If
 End Sub
 
@@ -619,137 +618,77 @@ Public Function BuildSTRMapVHST(vhstArr As Variant) As Object
     Set BuildSTRMapVHST = dict
 End Function
 
-' Builds unique global Fonction list from VHST sheet using header "Fonctions".
-Public Function BuildFonctionsFromVHST(vhstArr As Variant) As Collection
+' Builds unique values from a column name in a loaded array.
+Private Function BuildUniqueValuesFromHeader(ByVal dataArr As Variant, ByVal headerName As String) As Collection
     Dim result As New Collection
     Dim seen As Object
     Dim r As Long
-    Dim fn As String
-    Dim fonctionsCol As Long
     Dim c As Long
+    Dim targetCol As Long
+    Dim valueName As String
 
     Set seen = CreateObject("Scripting.Dictionary")
     seen.CompareMode = vbTextCompare
 
-    If Not IsEmpty(vhstArr) Then
-        If UBound(vhstArr, 1) >= 2 Then
-            fonctionsCol = 0
-            For c = 1 To UBound(vhstArr, 2)
-                If StrComp(Trim$(CStr(vhstArr(1, c) & "")), HDR_FONCTIONS, vbTextCompare) = 0 Then
-                    fonctionsCol = c
-                    Exit For
-                End If
-            Next c
-
-            If fonctionsCol = 0 Then
-                Set BuildFonctionsFromVHST = result
-                Exit Function
-            End If
-
-            For r = 2 To UBound(vhstArr, 1)
-                fn = Trim$(CStr(vhstArr(r, fonctionsCol) & ""))
-                If fn <> "" Then
-                    If Not seen.Exists(fn) Then
-                        seen(fn) = True
-                        result.Add fn
-                    End If
-                End If
-            Next r
-        End If
+    If IsEmpty(dataArr) Then
+        Set BuildUniqueValuesFromHeader = result
+        Exit Function
+    End If
+    If UBound(dataArr, 1) < 2 Then
+        Set BuildUniqueValuesFromHeader = result
+        Exit Function
     End If
 
-    Set BuildFonctionsFromVHST = result
-End Function
-
-' Builds unique global TypeLivrable list from VHST sheet using header "Type de livrable".
-Public Function BuildTypeLivrablesFromVHST(vhstArr As Variant) As Collection
-    Dim result As New Collection
-    Dim seen As Object
-    Dim r As Long
-    Dim typeLivrableName As String
-    Dim typeLivrableCol As Long
-    Dim c As Long
-
-    Set seen = CreateObject("Scripting.Dictionary")
-    seen.CompareMode = vbTextCompare
-
-    If Not IsEmpty(vhstArr) Then
-        If UBound(vhstArr, 1) >= 2 Then
-            typeLivrableCol = 0
-            For c = 1 To UBound(vhstArr, 2)
-                If StrComp(Trim$(CStr(vhstArr(1, c) & "")), HDR_TYPE_LIVRABLE, vbTextCompare) = 0 Then
-                    typeLivrableCol = c
-                    Exit For
-                End If
-            Next c
-
-            If typeLivrableCol = 0 Then
-                Set BuildTypeLivrablesFromVHST = result
-                Exit Function
-            End If
-
-            For r = 2 To UBound(vhstArr, 1)
-                typeLivrableName = Trim$(CStr(vhstArr(r, typeLivrableCol) & ""))
-                If typeLivrableName <> "" Then
-                    If Not seen.Exists(typeLivrableName) Then
-                        seen(typeLivrableName) = True
-                        result.Add typeLivrableName
-                    End If
-                End If
-            Next r
+    targetCol = 0
+    For c = 1 To UBound(dataArr, 2)
+        If StrComp(Trim$(CStr(dataArr(1, c) & "")), headerName, vbTextCompare) = 0 Then
+            targetCol = c
+            Exit For
         End If
+    Next c
+
+    If targetCol = 0 Then
+        Set BuildUniqueValuesFromHeader = result
+        Exit Function
     End If
 
-    Set BuildTypeLivrablesFromVHST = result
+    For r = 2 To UBound(dataArr, 1)
+        valueName = Trim$(CStr(dataArr(r, targetCol) & ""))
+        If valueName <> "" Then
+            If Not seen.Exists(valueName) Then
+                seen(valueName) = True
+                result.Add valueName
+            End If
+        End If
+    Next r
+
+    Set BuildUniqueValuesFromHeader = result
 End Function
 
-' Ensures default Type livrables (ADL1, SwDS) exist in VHST.
-Public Sub EnsureDefaultTypeLivrablesInVHST(wsVHST As Worksheet)
-    Dim tbl As ListObject
-    Dim lc As ListColumn
-    Dim i As Long
+' Builds unique global Fonction list from config sheet using header "Fonctions".
+Public Function BuildFonctionsFromConfig(configArr As Variant) As Collection
+    Set BuildFonctionsFromConfig = BuildUniqueValuesFromHeader(configArr, HDR_FONCTIONS)
+End Function
+
+' Builds unique global TypeLivrable list from config sheet using header "Type de livrable".
+Public Function BuildTypeLivrablesFromConfig(configArr As Variant) As Collection
+    Set BuildTypeLivrablesFromConfig = BuildUniqueValuesFromHeader(configArr, HDR_TYPE_LIVRABLE)
+End Function
+
+' Ensures default Type livrables (ADL1, SwDS) exist in config sheet.
+Public Sub EnsureDefaultTypeLivrablesInConfig(wsConfig As Worksheet)
     Dim lastCol As Long
     Dim lastRow As Long
     Dim targetCol As Long
     Dim c As Long
     Dim headerValue As String
 
-    On Error Resume Next
-    Set tbl = wsVHST.ListObjects("EDU_CE_VHST")
-    On Error GoTo 0
-
-    If Not tbl Is Nothing Then
-        Set lc = Nothing
-        For i = 1 To tbl.ListColumns.Count
-            If StrComp(Trim$(CStr(tbl.ListColumns(i).Name & "")), HDR_TYPE_LIVRABLE, vbTextCompare) = 0 Then
-                Set lc = tbl.ListColumns(i)
-                Exit For
-            End If
-        Next i
-
-        If lc Is Nothing Then
-            Set lc = tbl.ListColumns.Add
-            lc.Name = HDR_TYPE_LIVRABLE
-        End If
-
-        Do While tbl.ListRows.Count < 2
-            tbl.ListRows.Add
-        Loop
-
-        If Not lc.DataBodyRange Is Nothing Then
-            lc.DataBodyRange.ClearContents
-            lc.DataBodyRange.Cells(1, 1).Value = "ADL1"
-            lc.DataBodyRange.Cells(2, 1).Value = "SwDS"
-        End If
-        Exit Sub
-    End If
-
     targetCol = 0
-    lastCol = wsVHST.Cells(1, wsVHST.Columns.Count).End(xlToLeft).Column
+    lastCol = wsConfig.Cells(1, wsConfig.Columns.Count).End(xlToLeft).Column
     If lastCol < 1 Then lastCol = 1
 
     For c = 1 To lastCol
-        headerValue = Trim$(CStr(wsVHST.Cells(1, c).Value & ""))
+        headerValue = Trim$(CStr(wsConfig.Cells(1, c).Value & ""))
         If StrComp(headerValue, HDR_TYPE_LIVRABLE, vbTextCompare) = 0 Then
             targetCol = c
             Exit For
@@ -758,15 +697,15 @@ Public Sub EnsureDefaultTypeLivrablesInVHST(wsVHST As Worksheet)
 
     If targetCol = 0 Then
         targetCol = lastCol + 1
-        wsVHST.Cells(1, targetCol).Value = HDR_TYPE_LIVRABLE
+        wsConfig.Cells(1, targetCol).Value = HDR_TYPE_LIVRABLE
     End If
 
-    lastRow = wsVHST.Cells(wsVHST.Rows.Count, targetCol).End(xlUp).Row
+    lastRow = wsConfig.Cells(wsConfig.Rows.Count, targetCol).End(xlUp).Row
     If lastRow < 2 Then lastRow = 2
-    wsVHST.Range(wsVHST.Cells(2, targetCol), wsVHST.Cells(lastRow, targetCol)).ClearContents
+    wsConfig.Range(wsConfig.Cells(2, targetCol), wsConfig.Cells(lastRow, targetCol)).ClearContents
 
-    wsVHST.Cells(2, targetCol).Value = "ADL1"
-    wsVHST.Cells(3, targetCol).Value = "SwDS"
+    wsConfig.Cells(DATA_ROW_2, targetCol).Value = TYPE_LIVRABLE_ADL1
+    wsConfig.Cells(DATA_ROW_3, targetCol).Value = TYPE_LIVRABLE_SWDS
 End Sub
 
 
@@ -994,7 +933,7 @@ Public Function BuildUVRColumnMap(wsLiv As Worksheet, uvrArr As Variant) As Obje
     Set dict = CreateObject("Scripting.Dictionary")
 
     For colIdx = COL_U To COL_X
-        headerName = LCase(Trim$(CStr(wsLiv.Cells(3, colIdx).Value & "")))
+        headerName = LCase(Trim$(CStr(wsLiv.Cells(UVR_HEADER_ROW_IN_LIV, colIdx).Value & "")))
         If headerName <> "" Then
             For uc = 1 To UBound(uvrArr, 2)
                 If LCase(Trim$(CStr(uvrArr(1, uc) & ""))) = headerName Then
@@ -1121,7 +1060,7 @@ Public Function ComputeColF(B As String, C As String, D As String, _
     cnt = 0
     lB = LCase(B): lD = LCase(D): lE = LCase(E)
     valueCol = COL_J
-    If LCase(Trim$(C)) = "swds" Then valueCol = COL_L
+    If LCase(Trim$(C)) = LCase(TYPE_LIVRABLE_SWDS) Then valueCol = COL_L
 
     For r = CR_FIRST_ROW To UBound(crArr, 1)
         If LCase(CStr(crArr(r, COL_B) & "")) = lB And _
@@ -1148,14 +1087,14 @@ Public Function ComputeColG(B As String, C As String, D As String, _
     lB = LCase(B): lD = LCase(D): lE = LCase(E)
     lBloque = LCase("Bloqu" & ChrW(233))
     valueCol = COL_J
-    If LCase(Trim$(C)) = "swds" Then valueCol = COL_L
+    If LCase(Trim$(C)) = LCase(TYPE_LIVRABLE_SWDS) Then valueCol = COL_L
 
     For r = CR_FIRST_ROW To UBound(crArr, 1)
         If LCase(CStr(crArr(r, COL_B) & "")) = lB And _
            LCase(CStr(crArr(r, COL_C) & "")) = lD And _
            LCase(CStr(crArr(r, COL_D) & "")) = lE And _
            CStr(crArr(r, valueCol) & "") <> "" And _
-           (LCase(CStr(crArr(r, COL_G) & "")) = lBloque Or LCase(CStr(crArr(r, COL_G) & "")) = "bloque") Then
+           (LCase(CStr(crArr(r, COL_G) & "")) = lBloque Or LCase(CStr(crArr(r, COL_G) & "")) = BLOCKED_FR) Then
             cnt = cnt + 1
         End If
     Next r
@@ -1255,7 +1194,7 @@ Public Function ComputeColJ(B As String, C As String, D As String, _
     maxVal = 0
     found = False
     lB = LCase(B): lC = LCase(C): lD = LCase(D): lE = LCase(E)
-    isSwds = (LCase(Trim$(C)) = "swds")
+    isSwds = (LCase(Trim$(C)) = LCase(TYPE_LIVRABLE_SWDS))
 
     For r = 2 To UBound(powqArr, 1)
         If LCase(CStr(powqArr(r, COL_B) & "")) = lB And _
@@ -1307,7 +1246,7 @@ Public Function ComputeColK(B As String, C As String, D As String, _
 
     lB = LCase(B): lD = LCase(D): lE = LCase(E)
 
-    If LCase(C) = "adl1" Then
+    If LCase(C) = LCase(TYPE_LIVRABLE_ADL1) Then
         total = 0: cnt = 0
         For r = CR_FIRST_ROW To UBound(crArr, 1)
             If LCase(CStr(crArr(r, COL_B) & "")) = lB And _
@@ -1319,7 +1258,7 @@ Public Function ComputeColK(B As String, C As String, D As String, _
             End If
         Next r
 
-    ElseIf LCase(C) = "swds" Or LCase(C) = "reprise suite valid" Then
+    ElseIf LCase(C) = LCase(TYPE_LIVRABLE_SWDS) Or LCase(C) = "reprise suite valid" Then
         total = 0: cnt = 0
         For r = CR_FIRST_ROW To UBound(crArr, 1)
             If LCase(CStr(crArr(r, COL_B) & "")) = lB And _
