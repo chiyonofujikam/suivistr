@@ -1,3 +1,9 @@
+Option Explicit
+
+Private m_PowQBatchMode As Boolean
+Private m_PowQBatchStatus As Object
+Private m_PowQCurrentProcess As String
+
 ' Returns True when value is empty or numeric zero.
 Private Function IsZeroOrEmpty(v As Variant) As Boolean
     If IsEmpty(v) Then
@@ -84,6 +90,7 @@ End Function
 ' Normalizes header text for reliable comparisons.
 Private Function NormalizeHeaderText(ByVal s As String) As String
     s = Replace(s, Chr$(160), " ")
+    s = Replace(s, ChrW$(8203), "")
     s = Replace(s, vbCr, " ")
     s = Replace(s, vbLf, " ")
     s = Trim$(s)
@@ -91,6 +98,38 @@ Private Function NormalizeHeaderText(ByVal s As String) As String
         s = Replace(s, "  ", " ")
     Loop
     NormalizeHeaderText = LCase$(s)
+End Function
+
+' Makes table headers unique for Excel without changing visible label.
+Private Function BuildExcelSafeHeaders(ByVal headers As Variant) As Variant
+    Dim result() As Variant
+    Dim seen As Object
+    Dim normKey As String
+    Dim label As String
+    Dim i As Long
+    Dim dupIdx As Long
+
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = vbTextCompare
+
+    ReDim result(LBound(headers) To UBound(headers))
+    For i = LBound(headers) To UBound(headers)
+        label = CStr(headers(i))
+        If Len(label) = 0 Then label = "Col_" & CStr(i)
+        normKey = NormalizeHeaderText(label)
+        If Len(normKey) = 0 Then normKey = "COL_" & CStr(i)
+
+        If Not seen.Exists(normKey) Then
+            seen.Add normKey, 0
+            result(i) = label
+        Else
+            dupIdx = CLng(seen(normKey)) + 1
+            seen(normKey) = dupIdx
+            result(i) = label & String$(dupIdx, ChrW$(8203))
+        End If
+    Next i
+
+    BuildExcelSafeHeaders = result
 End Function
 
 ' Returns True when UVR destination column is a date field.
@@ -146,6 +185,85 @@ Private Function TryGetWorksheet(ByVal wb As Workbook, ByVal sheetName As String
     TryGetWorksheet = Not ws Is Nothing
 End Function
 
+Private Sub PowQBatchStart()
+    m_PowQBatchMode = True
+    Set m_PowQBatchStatus = CreateObject("Scripting.Dictionary")
+    m_PowQCurrentProcess = ""
+End Sub
+
+Private Sub PowQBatchSetProcess(ByVal processName As String)
+    m_PowQCurrentProcess = processName
+    If m_PowQBatchStatus Is Nothing Then Set m_PowQBatchStatus = CreateObject("Scripting.Dictionary")
+    If Not m_PowQBatchStatus.Exists(processName) Then
+        m_PowQBatchStatus.Add processName, "PENDING"
+    End If
+End Sub
+
+Private Sub PowQBatchMarkSuccess()
+    If Not m_PowQBatchMode Then Exit Sub
+    If Len(m_PowQCurrentProcess) = 0 Then Exit Sub
+    m_PowQBatchStatus(m_PowQCurrentProcess) = "OK"
+End Sub
+
+Private Sub PowQBatchMarkError(ByVal messageText As String)
+    If Not m_PowQBatchMode Then Exit Sub
+    If Len(m_PowQCurrentProcess) = 0 Then Exit Sub
+    If Not m_PowQBatchStatus.Exists(m_PowQCurrentProcess) Then
+        m_PowQBatchStatus.Add m_PowQCurrentProcess, "ERROR: " & messageText
+        Exit Sub
+    End If
+    If Left$(CStr(m_PowQBatchStatus(m_PowQCurrentProcess)), 2) <> "OK" Then
+        m_PowQBatchStatus(m_PowQCurrentProcess) = "ERROR: " & messageText
+    End If
+End Sub
+
+Private Sub PowQBatchFinish()
+    Dim p As Variant
+    Dim statusText As String
+    Dim allOk As Boolean
+    Dim summary As String
+
+    If m_PowQBatchStatus Is Nothing Then Exit Sub
+
+    allOk = True
+    summary = "Statut PowQ Tout :" & vbCrLf & vbCrLf
+    For Each p In m_PowQBatchStatus.Keys
+        statusText = CStr(m_PowQBatchStatus(p))
+        summary = summary & "- " & CStr(p) & " : " & statusText & vbCrLf
+        If Left$(statusText, 2) <> "OK" Then allOk = False
+    Next p
+
+    If allOk Then
+        VBA.Interaction.MsgBox summary, vbInformation, "PowQ Tout"
+    Else
+        VBA.Interaction.MsgBox summary, vbExclamation, "PowQ Tout"
+    End If
+
+    m_PowQBatchMode = False
+    Set m_PowQBatchStatus = Nothing
+    m_PowQCurrentProcess = ""
+End Sub
+
+' Local wrapper to suppress popups during PowQ Tout batch mode.
+Private Function MsgBox(Prompt As String, Optional Buttons As VbMsgBoxStyle = vbOKOnly, Optional Title As String = "") As VbMsgBoxResult
+    Dim iconPart As Long
+    If Not m_PowQBatchMode Then
+        MsgBox = VBA.Interaction.MsgBox(Prompt, Buttons, Title)
+        Exit Function
+    End If
+
+    iconPart = (Buttons And (vbCritical Or vbExclamation Or vbInformation Or vbQuestion))
+    If iconPart = vbCritical Or iconPart = vbExclamation Then
+        PowQBatchMarkError Prompt
+    End If
+
+    If (Buttons And vbYesNo) = vbYesNo Then
+        MsgBox = vbYes
+    Else
+        MsgBox = vbOK
+    End If
+End Function
+
 
 ' Rebuilds PowQ_Extract from a selected input workbook.
 Sub Update_PowQ_Exract(Optional ByVal externalWorkbookPath As String = "", Optional ByVal inputSheetName As String = "")
@@ -172,6 +290,7 @@ Sub Update_PowQ_Exract(Optional ByVal externalWorkbookPath As String = "", Optio
     Dim headers As Variant
     Dim existingTableNames As String
     Dim userChoice As VbMsgBoxResult
+    Dim shouldFocusOutput As Boolean
 
     ' Ask user for the source workbook when no external path is provided.
     If Len(externalWorkbookPath) > 0 Then
@@ -208,12 +327,7 @@ Sub Update_PowQ_Exract(Optional ByVal externalWorkbookPath As String = "", Optio
             GoTo Cleanup
         End If
     Else
-        If wbInput.Worksheets.Count <> 1 Then
-            MsgBox "Le fichier d'entrée doit contenir une seule feuille.", vbExclamation, "Attention"
-            wbInput.Close False
-            GoTo Cleanup
-        End If
-        Set wsInput = wbInput.Sheets(1)
+        Set wsInput = wbInput.Worksheets(1)
     End If
 
     If IsWorksheetEmpty(wsInput) Then
@@ -388,6 +502,8 @@ SkipRow2:
     Set tbl = wsOutput.ListObjects.Add(xlSrcRange, tblRange, , xlYes)
     tbl.Name = TBL_EXTRACT
 
+    PowQBatchMarkSuccess
+    shouldFocusOutput = True
     MsgBox "Mise à jour de PowQ_Extract terminée." & vbCrLf & _
            filteredCount & " lignes écrites (" & (dataCount - filteredCount) & " lignes ignorées).", vbInformation, "Terminé"
     GoTo Cleanup
@@ -400,6 +516,12 @@ Cleanup:
     Application.ScreenUpdating = True
     Application.Calculation = xlCalculationAutomatic
     Application.EnableEvents = True
+    If shouldFocusOutput Then
+        On Error Resume Next
+        wsOutput.Activate
+        wsOutput.Cells(1, 1).Select
+        On Error GoTo 0
+    End If
 End Sub
 
 
@@ -434,14 +556,8 @@ End Function
 ' Returns the target table from PowQ_EDU_CE_VHST sheet.
 Private Function GetEduTable(ByVal ws As Worksheet) As ListObject
     On Error Resume Next
-    Set GetEduTable = ws.ListObjects("EDU_CE_VHST")
+    Set GetEduTable = ws.ListObjects(TBL_EDU)
     On Error GoTo 0
-
-    If GetEduTable Is Nothing Then
-        On Error Resume Next
-        Set GetEduTable = ws.ListObjects("PowQ_EDU_CE_VHST")
-        On Error GoTo 0
-    End If
 
     If GetEduTable Is Nothing Then
         If ws.ListObjects.Count > 0 Then
@@ -472,6 +588,10 @@ Sub Update_PowQ_EDU_CE_VHST(Optional ByVal externalWorkbookPath As String = "", 
     Dim rngTarget As Range
     Dim srcData As Variant
     Dim tgtData As Variant
+    Dim sourceMaxCount As Long
+    Dim tableColCount As Long
+    Dim createRange As Range
+    Dim shouldFocusOutput As Boolean
 
     requiredHeaders = GetPowQEduHeaders()
     ReDim headerRows(LBound(requiredHeaders) To UBound(requiredHeaders))
@@ -497,14 +617,6 @@ Sub Update_PowQ_EDU_CE_VHST(Optional ByVal externalWorkbookPath As String = "", 
     End If
 
     Set tbl = GetEduTable(wsOutput)
-    If tbl Is Nothing Then
-        MsgBox "Aucun tableau n'a été trouvé sur la feuille '" & SH_VHST & "'.", vbCritical, "Erreur"
-        Exit Sub
-    End If
-    If tbl.DataBodyRange Is Nothing Then
-        MsgBox "Le tableau de la feuille '" & SH_VHST & "' ne contient aucune ligne.", vbExclamation, "Attention"
-        Exit Sub
-    End If
 
     Application.ScreenUpdating = False
     Application.Calculation = xlCalculationManual
@@ -520,8 +632,8 @@ Sub Update_PowQ_EDU_CE_VHST(Optional ByVal externalWorkbookPath As String = "", 
             GoTo Cleanup
         End If
     Else
-        If Not TryGetWorksheet(wbInput, SH_IN_VHST_REF, wsInput) Then
-            MsgBox "La feuille '" & SH_IN_VHST_REF & "' est introuvable dans le fichier d'entrée.", vbCritical, "Erreur"
+        If Not TryGetWorksheet(wbInput, SH_IN_VHST, wsInput) Then
+            MsgBox "La feuille '" & SH_IN_VHST & "' est introuvable dans le fichier d'entrée.", vbCritical, "Erreur"
             wbInput.Close False
             GoTo Cleanup
         End If
@@ -555,6 +667,26 @@ Sub Update_PowQ_EDU_CE_VHST(Optional ByVal externalWorkbookPath As String = "", 
 
         colDataCounts(i) = GetColumnDataCount(wsInput, headerRows(i), headerCols(i))
     Next i
+
+    sourceMaxCount = 0
+    For i = LBound(requiredHeaders) To UBound(requiredHeaders)
+        If colDataCounts(i) > sourceMaxCount Then sourceMaxCount = colDataCounts(i)
+    Next i
+
+    tableColCount = UBound(requiredHeaders) - LBound(requiredHeaders) + 1
+    If sourceMaxCount < 1 Then sourceMaxCount = 1
+
+    If tbl Is Nothing Then
+        For i = LBound(requiredHeaders) To UBound(requiredHeaders)
+            wsOutput.Cells(1, i - LBound(requiredHeaders) + 1).Value = CStr(requiredHeaders(i))
+        Next i
+        Set createRange = wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(sourceMaxCount + 1, tableColCount))
+        Set tbl = wsOutput.ListObjects.Add(xlSrcRange, createRange, , xlYes)
+        tbl.Name = TBL_EDU
+    ElseIf tbl.ListRows.Count <> sourceMaxCount Then
+        Set createRange = wsOutput.Range(tbl.HeaderRowRange.Cells(1, 1), tbl.HeaderRowRange.Cells(1, tableColCount).Offset(sourceMaxCount, 0))
+        tbl.Resize createRange
+    End If
 
     tableRowCount = tbl.ListRows.Count
 
@@ -610,6 +742,8 @@ Sub Update_PowQ_EDU_CE_VHST(Optional ByVal externalWorkbookPath As String = "", 
     wbInput.Close False
     Set wbInput = Nothing
 
+    PowQBatchMarkSuccess
+    shouldFocusOutput = True
     MsgBox "Mise à jour de PowQ_EDU_CE_VHST terminée." & vbCrLf & _
            "Colonnes mises à jour : Nom_STR, Sprint, Collaborateurs, Sociétés, Info_Complet.", vbInformation, "Terminé"
     GoTo Cleanup
@@ -622,6 +756,12 @@ Cleanup:
     Application.ScreenUpdating = True
     Application.Calculation = xlCalculationAutomatic
     Application.EnableEvents = True
+    If shouldFocusOutput Then
+        On Error Resume Next
+        wsOutput.Activate
+        wsOutput.Cells(1, 1).Select
+        On Error GoTo 0
+    End If
 End Sub
 
 
@@ -654,11 +794,16 @@ Sub Update_PowQ_Suivi_UVR(Optional ByVal externalWorkbookPath As String = "", Op
     Dim outHeader As String
     Dim foundHeader As Range
     Dim headerColMap As Object
+    Dim headerNextIdx As Object
+    Dim colList As Collection
     Dim headerKey As String
     Dim c As Long
     Dim useInputHeaders As Boolean
+    Dim shouldFocusOutput As Boolean
     Dim targetTableName As String
     Dim availableHeaders As String
+    Dim pos As Long
+    Dim outputHeaders As Variant
 
     targetTableName = TBL_UVR
     headerRow = UVR_HEADER_ROW
@@ -753,11 +898,19 @@ Sub Update_PowQ_Suivi_UVR(Optional ByVal externalWorkbookPath As String = "", Op
 
     Set headerColMap = CreateObject("Scripting.Dictionary")
     headerColMap.CompareMode = vbTextCompare
+    Set headerNextIdx = CreateObject("Scripting.Dictionary")
+    headerNextIdx.CompareMode = vbTextCompare
     For c = 1 To 23 ' A:W
         headerKey = NormalizeHeaderText(CStr(wsInput.Cells(headerRow, c).Value2 & ""))
         If Len(headerKey) > 0 Then
             If Not headerColMap.Exists(headerKey) Then
-                headerColMap.Add headerKey, c
+                Set colList = New Collection
+                colList.Add c
+                headerColMap.Add headerKey, colList
+                headerNextIdx.Add headerKey, 1
+            Else
+                Set colList = headerColMap(headerKey)
+                colList.Add c
             End If
         End If
     Next c
@@ -797,7 +950,11 @@ Sub Update_PowQ_Suivi_UVR(Optional ByVal externalWorkbookPath As String = "", Op
             If Not wasAlreadyOpen Then wbInput.Close False
             Exit Sub
         End If
-        srcHeaderCols(i) = CLng(headerColMap(headerKey))
+        Set colList = headerColMap(headerKey)
+        pos = CLng(headerNextIdx(headerKey))
+        If pos > colList.Count Then pos = colList.Count
+        srcHeaderCols(i) = CLng(colList(pos))
+        If pos < colList.Count Then headerNextIdx(headerKey) = pos + 1
         If Len(availableHeaders) > 0 Then availableHeaders = availableHeaders & ", "
         availableHeaders = availableHeaders & outHeader
     Next i
@@ -849,8 +1006,9 @@ Sub Update_PowQ_Suivi_UVR(Optional ByVal externalWorkbookPath As String = "", Op
 
     wsOutput.Cells.ClearContents
 
+    outputHeaders = BuildExcelSafeHeaders(requiredHeaders)
     For i = 1 To colCount
-        wsOutput.Cells(1, i).Value = requiredHeaders(i)
+        wsOutput.Cells(1, i).Value = outputHeaders(i)
     Next i
 
     If rowCount > 0 Then
@@ -871,6 +1029,8 @@ Sub Update_PowQ_Suivi_UVR(Optional ByVal externalWorkbookPath As String = "", Op
     Set tbl = wsOutput.ListObjects.Add(xlSrcRange, tblRange, , xlYes)
     tbl.Name = targetTableName
 
+    PowQBatchMarkSuccess
+    shouldFocusOutput = True
     MsgBox "Mise à jour de " & SH_UVR & " terminée depuis la feuille '" & SH_IN_UVR & "'." & vbCrLf & _
            rowCount & " ligne(s) chargée(s).", vbInformation, "Terminé"
     GoTo Cleanup
@@ -885,19 +1045,61 @@ Cleanup:
     Application.ScreenUpdating = True
     Application.Calculation = xlCalculationAutomatic
     Application.EnableEvents = True
+    If shouldFocusOutput Then
+        On Error Resume Next
+        wsOutput.Activate
+        wsOutput.Cells(1, 1).Select
+        On Error GoTo 0
+    End If
 End Sub
 
-' Runs all PowQ updates from one selected workbook.
+' Runs all PowQ updates using 3 file dialogs.
 Sub Update_PowQ_All()
-    Dim inputFilePath As Variant
+    Dim inputFileEDU As String
+    Dim inputFileExtract As String
+    Dim inputFileUVR As String
+    inputFileEDU = PickPowQInputFile("PowQ Tout - Sélectionner le fichier EDU_CE_VHST")
+    If Len(inputFileEDU) = 0 Then Exit Sub
 
-    inputFilePath = Application.GetOpenFilename( _
-        FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
-        Title:="Sélectionner le fichier d'entrée PowQ (3 feuilles)")
+    inputFileUVR = PickPowQInputFile("PowQ Tout - Sélectionner le fichier UVR (Global)")
+    If Len(inputFileUVR) = 0 Then Exit Sub
 
-    If inputFilePath = False Then Exit Sub
+    inputFileExtract = PickPowQInputFile("PowQ Tout - Sélectionner le fichier Extract")
+    If Len(inputFileExtract) = 0 Then Exit Sub
+    If Not ConfirmPowQAllFiles(inputFileEDU, inputFileUVR, inputFileExtract) Then Exit Sub
 
-    Update_PowQ_EDU_CE_VHST CStr(inputFilePath), SH_IN_VHST
-    Update_PowQ_Exract CStr(inputFilePath), SH_IN_EXTRACT
-    Update_PowQ_Suivi_UVR CStr(inputFilePath), SH_IN_UVR
+    PowQBatchStart
+    PowQBatchSetProcess "EDU_CE_VHST"
+    Update_PowQ_EDU_CE_VHST inputFileEDU, SH_IN_VHST
+    PowQBatchSetProcess "UVR"
+    Update_PowQ_Suivi_UVR inputFileUVR, SH_IN_UVR
+    PowQBatchSetProcess "Extract"
+    Update_PowQ_Exract inputFileExtract
+    PowQBatchFinish
 End Sub
+
+Private Function PickPowQInputFile(ByVal dialogTitle As String) As String
+    Dim picked As Variant
+    picked = Application.GetOpenFilename( _
+        FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
+        Title:=dialogTitle)
+    If VarType(picked) = vbBoolean Then
+        If CBool(picked) = False Then
+            PickPowQInputFile = ""
+            Exit Function
+        End If
+    End If
+    PickPowQInputFile = CStr(picked)
+End Function
+
+Private Function ConfirmPowQAllFiles(ByVal fileEDU As String, ByVal fileUVR As String, ByVal fileExtract As String) As Boolean
+    Dim resp As VbMsgBoxResult
+    resp = VBA.Interaction.MsgBox( _
+        "Confirmer les fichiers PowQ Tout :" & vbCrLf & vbCrLf & _
+        "EDU_CE_VHST :" & vbCrLf & Dir$(fileEDU) & vbCrLf & vbCrLf & _
+        "UVR (Global) :" & vbCrLf & Dir$(fileUVR) & vbCrLf & vbCrLf & _
+        "Extract :" & vbCrLf & Dir$(fileExtract), _
+        vbYesNo + vbQuestion + vbDefaultButton2, _
+        "Confirmation PowQ Tout")
+    ConfirmPowQAllFiles = (resp = vbYes)
+End Function

@@ -12,12 +12,12 @@ Public Const SH_CONFIG     As String = "config"
 ' Input sheet names used across update workflows (toutes les updates)
 Public Const SH_IN_EXTRACT As String = "Extract"
 Public Const SH_IN_UVR     As String = "Global"
-Public Const SH_IN_VHST    As String = "EDU_CE_VHST"
-Public Const SH_IN_VHST_REF As String = "Références_CE_VHST"
+Public Const SH_IN_VHST As String = "Références_CE_VHST"
 
 ' Table names used in PowQ sheets.
 Public Const TBL_EXTRACT   As String = "Extract_MSP"
 Public Const TBL_UVR       As String = "Suivi_UVR"
+Public Const TBL_EDU       As String = "EDU_CE_VHST"
 
 ' UVR source layout in input sheet.
 Public Const UVR_HEADER_ROW As Long = 12
