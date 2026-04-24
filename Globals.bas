@@ -9,10 +9,10 @@ Public Const SH_VHST       As String = "PowQ_EDU_CE_VHST"
 Public Const SH_BN         As String = "BN_Suivi dossier Safety"
 Public Const SH_CONFIG     As String = "config"
 
-' Input sheet names used across update workflows (toutes les updates)
+' Input sheet names used by update flows.
 Public Const SH_IN_EXTRACT As String = "Extract"
 Public Const SH_IN_UVR     As String = "Global"
-Public Const SH_IN_VHST As String = "Références_CE_VHST"
+Public Const SH_IN_VHST  As String = "Références_CE_VHST"
 
 ' Table names used in PowQ sheets.
 Public Const TBL_EXTRACT   As String = "Extract_MSP"

@@ -426,6 +426,101 @@ Public Function FindAllRowsBySTR(livArr As Variant, strVal As String) As Collect
     Set FindAllRowsBySTR = result
 End Function
 
+' Builds a stable composite key from Suivi_Livrables columns B/C/D/E.
+Public Function BuildSuiviLivrableCompositeKey(ByVal ws As Worksheet, ByVal rowIdx As Long) As String
+    BuildSuiviLivrableCompositeKey = Trim$(CStr(ws.Cells(rowIdx, COL_B).Value & "")) & vbTab & _
+                                     Trim$(CStr(ws.Cells(rowIdx, COL_C).Value & "")) & vbTab & _
+                                     Trim$(CStr(ws.Cells(rowIdx, COL_D).Value & "")) & vbTab & _
+                                     Trim$(CStr(ws.Cells(rowIdx, COL_E).Value & ""))
+End Function
+
+' Captures manual Suivi_Livrables values (L,N,P,Q,R,S,Y) keyed by B/C/D/E.
+Public Function CaptureSuiviLivrableManualValues(ByVal wsLiv As Worksheet) As Object
+    Dim snapshot As Object
+    Dim lastRow As Long
+    Dim rr As Long
+    Dim rowKey As String
+    Dim payload(1 To 7) As Variant
+
+    Set snapshot = CreateObject("Scripting.Dictionary")
+    snapshot.CompareMode = vbBinaryCompare
+
+    lastRow = GetLastDataRow(wsLiv, COL_B)
+    If lastRow < LIV_FIRST_ROW Then
+        Set CaptureSuiviLivrableManualValues = snapshot
+        Exit Function
+    End If
+
+    For rr = LIV_FIRST_ROW To lastRow
+        rowKey = BuildSuiviLivrableCompositeKey(wsLiv, rr)
+        If Replace(rowKey, vbTab, "") <> "" Then
+            payload(1) = wsLiv.Cells(rr, 12).Value2 ' L
+            payload(2) = wsLiv.Cells(rr, 14).Value2 ' N
+            payload(3) = wsLiv.Cells(rr, 16).Value2 ' P
+            payload(4) = wsLiv.Cells(rr, 17).Value2 ' Q
+            payload(5) = wsLiv.Cells(rr, 18).Value2 ' R
+            payload(6) = wsLiv.Cells(rr, 19).Value2 ' S
+            payload(7) = wsLiv.Cells(rr, COL_Y).Value2 ' Y
+            snapshot(rowKey) = payload
+        End If
+    Next rr
+
+    Set CaptureSuiviLivrableManualValues = snapshot
+End Function
+
+' Converts empty values to blank and keeps valid date values as Date.
+Public Function NormalizeDateValueOrBlank(ByVal v As Variant) As Variant
+    If IsEmpty(v) Then
+        NormalizeDateValueOrBlank = ""
+        Exit Function
+    End If
+    If VarType(v) = vbString Then
+        If Trim$(CStr(v)) = "" Then
+            NormalizeDateValueOrBlank = ""
+            Exit Function
+        End If
+    End If
+    If IsDate(v) Then
+        NormalizeDateValueOrBlank = CDate(v)
+    Else
+        NormalizeDateValueOrBlank = v
+    End If
+End Function
+
+' Restores manual Suivi_Livrables values (L,N,P,Q,R,S,Y) by B/C/D/E key.
+Public Sub RestoreSuiviLivrableManualValues(ByVal wsLiv As Worksheet, ByVal snapshot As Object)
+    Dim lastRow As Long
+    Dim rr As Long
+    Dim rowKey As String
+    Dim payload As Variant
+
+    If snapshot Is Nothing Then Exit Sub
+    If snapshot.Count = 0 Then Exit Sub
+
+    lastRow = GetLastDataRow(wsLiv, COL_B)
+    If lastRow < LIV_FIRST_ROW Then Exit Sub
+
+    For rr = LIV_FIRST_ROW To lastRow
+        rowKey = BuildSuiviLivrableCompositeKey(wsLiv, rr)
+        If snapshot.Exists(rowKey) Then
+            payload = snapshot(rowKey)
+            wsLiv.Cells(rr, 12).Value = NormalizeDateValueOrBlank(payload(1)) ' L
+            wsLiv.Cells(rr, 14).Value2 = payload(2) ' N
+            wsLiv.Cells(rr, 16).Value = NormalizeDateValueOrBlank(payload(3)) ' P
+            wsLiv.Cells(rr, 17).Value = NormalizeDateValueOrBlank(payload(4)) ' Q
+            wsLiv.Cells(rr, 18).Value = NormalizeDateValueOrBlank(payload(5)) ' R
+            wsLiv.Cells(rr, 19).Value = NormalizeDateValueOrBlank(payload(6)) ' S
+            wsLiv.Cells(rr, COL_Y).Value2 = payload(7) ' Y
+        End If
+    Next rr
+
+    wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, 12), wsLiv.Cells(lastRow, 12)).NumberFormat = "dd/mm/yyyy"
+    wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, 16), wsLiv.Cells(lastRow, 16)).NumberFormat = "dd/mm/yyyy"
+    wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, 17), wsLiv.Cells(lastRow, 17)).NumberFormat = "dd/mm/yyyy"
+    wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, 18), wsLiv.Cells(lastRow, 18)).NumberFormat = "dd/mm/yyyy"
+    wsLiv.Range(wsLiv.Cells(LIV_FIRST_ROW, 19), wsLiv.Cells(lastRow, 19)).NumberFormat = "dd/mm/yyyy"
+End Sub
+
 ' Normalizes sprint value to a comparable key.
 Public Function NormalizeSprintKey(v As Variant) As String
     Dim s As String
@@ -975,12 +1070,12 @@ Private Function NormalizeUVRCellByDestCol(v As Variant, ByVal destColIdx As Lon
             ' U and X are date fields: keep blank when missing/0.
             If IsValidPowQValue(v) Then
                 If IsDate(v) Then
-                    NormalizeUVRCellByDestCol = CDate(v)
+                    NormalizeUVRCellByDestCol = DateValue(CDate(v))
                 ElseIf IsNumeric(v) Then
                     If CDbl(v) = 0 Then
                         NormalizeUVRCellByDestCol = ""
                     Else
-                        NormalizeUVRCellByDestCol = CDate(CDbl(v))
+                        NormalizeUVRCellByDestCol = DateValue(CDate(CDbl(v)))
                     End If
                 Else
                     NormalizeUVRCellByDestCol = ""

@@ -46,6 +46,12 @@
                   screentip="Archiver puis vider la feuille BN_Suivi dossier Safety"
                   onAction="Ribbon_ArchiveBNSuivi"/>
         </group>
+        <group id="CollectSuiviLivrableGroup" label="Collect Suivi_Livrable">
+          <button id="BtnCollectSuiviLivrable" imageMso="ImportExcel" size="large"
+                  label="Collecter Suivi_Livrable"
+                  screentip="Sélectionner plusieurs fichiers Excel et collecter chaque feuille Suivi_Livrable dans un nouveau classeur"
+                  onAction="Ribbon_CollectSuiviLivrable"/>
+        </group>
       </tab>
     </tabs>
   </ribbon>

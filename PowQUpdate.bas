@@ -40,7 +40,7 @@ ErrH:
     SafeFloor = ""
 End Function
 
-' Converts input value to a Date serial when possible.
+' Converts input value to a Date serial (date only) when possible.
 Private Function ParseDateValue(v As Variant) As Variant
     On Error GoTo ErrH
 
@@ -50,7 +50,8 @@ Private Function ParseDateValue(v As Variant) As Variant
     End If
 
     If IsDate(v) Then
-        ParseDateValue = CDate(v)
+        ' Keep only the date portion (drop HH:MM:SS).
+        ParseDateValue = DateValue(CDate(v))
         Exit Function
     End If
 
@@ -58,7 +59,8 @@ Private Function ParseDateValue(v As Variant) As Variant
         If CDbl(v) = 0 Then
             ParseDateValue = ""
         Else
-            ParseDateValue = CDate(CDbl(v))
+            ' Excel stores datetimes as serial numbers where decimals are time.
+            ParseDateValue = DateValue(CDate(CDbl(v)))
         End If
         Exit Function
     End If
@@ -566,6 +568,87 @@ Private Function GetEduTable(ByVal ws As Worksheet) As ListObject
     End If
 End Function
 
+' Reapplies Suivi_CR validation lists fed by PowQ_EDU_CE_VHST.
+Private Sub ApplySuiviCRPowQValidations()
+    Dim wsCR As Worksheet
+    Dim wsVHST As Worksheet
+    Dim srcLastRowA As Long
+    Dim srcLastRowE As Long
+    Dim formulaA As String
+    Dim formulaE As String
+    Dim targetB As Range
+    Dim targetIE As Range
+    Dim targetKE As Range
+    Dim targetME As Range
+
+    On Error Resume Next
+    Set wsCR = ThisWorkbook.Worksheets(SH_CR)
+    Set wsVHST = ThisWorkbook.Worksheets(SH_VHST)
+    On Error GoTo 0
+
+    If wsCR Is Nothing Or wsVHST Is Nothing Then Exit Sub
+
+    srcLastRowA = wsVHST.Cells(wsVHST.Rows.Count, COL_A).End(xlUp).Row
+    If srcLastRowA < DATA_ROW_2 Then srcLastRowA = DATA_ROW_2
+
+    srcLastRowE = wsVHST.Cells(wsVHST.Rows.Count, COL_E).End(xlUp).Row
+    If srcLastRowE < DATA_ROW_2 Then srcLastRowE = DATA_ROW_2
+
+    formulaA = "='" & SH_VHST & "'!$A$2:$A$" & CStr(srcLastRowA)
+    formulaE = "='" & SH_VHST & "'!$E$2:$E$" & CStr(srcLastRowE)
+
+    Set targetB = wsCR.Range(wsCR.Cells(CR_FIRST_ROW, COL_B), wsCR.Cells(wsCR.Rows.Count, COL_B))
+    Set targetIE = wsCR.Range(wsCR.Cells(CR_FIRST_ROW, COL_I), wsCR.Cells(wsCR.Rows.Count, COL_I))
+    Set targetKE = wsCR.Range(wsCR.Cells(CR_FIRST_ROW, COL_K), wsCR.Cells(wsCR.Rows.Count, COL_K))
+    Set targetME = wsCR.Range(wsCR.Cells(CR_FIRST_ROW, COL_M), wsCR.Cells(wsCR.Rows.Count, COL_M))
+
+    targetB.Validation.Delete
+    targetIE.Validation.Delete
+    targetKE.Validation.Delete
+    targetME.Validation.Delete
+
+    targetB.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=formulaA
+    targetIE.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=formulaE
+    targetKE.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=formulaE
+    targetME.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=formulaE
+
+    targetB.Validation.IgnoreBlank = True
+    targetB.Validation.InCellDropdown = True
+    targetIE.Validation.IgnoreBlank = True
+    targetIE.Validation.InCellDropdown = True
+    targetKE.Validation.IgnoreBlank = True
+    targetKE.Validation.InCellDropdown = True
+    targetME.Validation.IgnoreBlank = True
+    targetME.Validation.InCellDropdown = True
+End Sub
+
+' Reapplies Bilan Périmètre validation fed by PowQ_EDU_CE_VHST column A.
+Private Sub ApplyBilanPerimetrePowQValidation()
+    Dim wsBilan As Worksheet
+    Dim wsVHST As Worksheet
+    Dim srcLastRowA As Long
+    Dim formulaA As String
+    Dim targetCell As Range
+
+    On Error Resume Next
+    Set wsBilan = ThisWorkbook.Worksheets("Bilan Périmètre")
+    Set wsVHST = ThisWorkbook.Worksheets(SH_VHST)
+    On Error GoTo 0
+
+    If wsBilan Is Nothing Or wsVHST Is Nothing Then Exit Sub
+
+    srcLastRowA = wsVHST.Cells(wsVHST.Rows.Count, COL_A).End(xlUp).Row
+    If srcLastRowA < DATA_ROW_2 Then srcLastRowA = DATA_ROW_2
+
+    formulaA = "='" & SH_VHST & "'!$A$2:$A$" & CStr(srcLastRowA)
+    Set targetCell = wsBilan.Range("C2")
+
+    targetCell.Validation.Delete
+    targetCell.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=formulaA
+    targetCell.Validation.IgnoreBlank = True
+    targetCell.Validation.InCellDropdown = True
+End Sub
+
 ' Updates only selected columns in PowQ_EDU_CE_VHST from a selected workbook.
 Sub Update_PowQ_EDU_CE_VHST(Optional ByVal externalWorkbookPath As String = "", Optional ByVal inputSheetName As String = "")
     Dim inputFilePath As Variant
@@ -741,6 +824,9 @@ Sub Update_PowQ_EDU_CE_VHST(Optional ByVal externalWorkbookPath As String = "", 
 
     wbInput.Close False
     Set wbInput = Nothing
+
+    ApplySuiviCRPowQValidations
+    ApplyBilanPerimetrePowQValidation
 
     PowQBatchMarkSuccess
     shouldFocusOutput = True

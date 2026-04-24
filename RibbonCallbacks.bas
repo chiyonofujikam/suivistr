@@ -1,51 +1,56 @@
 Option Explicit
 
-' Ribbon callback for save-copy button.
+' Save-copy ribbon action.
 Public Sub Ribbon_SaveWorkbookCopy(ByVal control As Object)
     RunMacroSafe "Sauvegarde copie classeur", "SaveWorkbookCopyToSelectedDestination", "SaveModule.SaveWorkbookCopyToSelectedDestination"
 End Sub
 
-' Ribbon callback for main update button.
+' Main update ribbon action.
 Public Sub Ribbon_UpdateSuivi(ByVal control As Object)
     RunMacroSafe "Mise a jour", "UpdateSuiviLivrable", "UpdateSuiviLivrable.UpdateSuiviLivrable"
 End Sub
 
-' Ribbon callback for archive button.
+' Archive Suivi ribbon action.
 Public Sub Ribbon_ArchiveSuivi(ByVal control As Object)
     RunMacroSafe "Archivage", "ArchiveSuiviLivrable", "ArchiveSuiviLivrable.ArchiveSuiviLivrable"
 End Sub
 
-' Ribbon callback for PowQ extract button.
+' PowQ Extract ribbon action.
 Public Sub Ribbon_PowQExtract(ByVal control As Object)
     RunMacroSafe "PowQ Extract", "Update_PowQ_Exract", "PowQUpdate.Update_PowQ_Exract"
 End Sub
 
-' Ribbon callback for PowQ UVR button.
+' PowQ UVR ribbon action.
 Public Sub Ribbon_PowQUVR(ByVal control As Object)
     RunMacroSafe "PowQ UVR", "Update_PowQ_Suivi_UVR", "PowQUpdate.Update_PowQ_Suivi_UVR"
 End Sub
 
-' Ribbon callback for PowQ EDU_CE_VHST button.
+' PowQ EDU_CE_VHST ribbon action.
 Public Sub Ribbon_PowQEDUCEVHST(ByVal control As Object)
     RunMacroSafe "PowQ EDU_CE_VHST", "Update_PowQ_EDU_CE_VHST", "PowQUpdate.Update_PowQ_EDU_CE_VHST"
 End Sub
 
-' Ribbon callback for PowQ 'all' button (runs all PowQ actions - en cours de dev).
+' PowQ all-in-one ribbon action.
 Public Sub Ribbon_PowQAll(ByVal control As Object)
     RunMacroSafe "PowQ Tout", "Update_PowQ_All", "PowQUpdate.Update_PowQ_All"
 End Sub
 
-' Ribbon callback for BN_Suivi button.
+' BN_Suivi fill ribbon action.
 Public Sub Ribbon_AddBNSuivi(ByVal control As Object)
     RunMacroSafe SH_BN, "AddBNSuivi", "AddBNSuivi.AddBNSuivi"
 End Sub
 
-' Ribbon callback for BN_Suivi archive button.
+' BN_Suivi archive ribbon action.
 Public Sub Ribbon_ArchiveBNSuivi(ByVal control As Object)
     RunMacroSafe "Archivage " & SH_BN, "ArchiveBNSuivi", "ArchiveBNSuivi.ArchiveBNSuivi"
 End Sub
 
-' Runs macro names safely using workbook-qualified then global lookup.
+' Collect Suivi_Livrable ribbon action.
+Public Sub Ribbon_CollectSuiviLivrable(ByVal control As Object)
+    RunMacroSafe "Collect Suivi_Livrable", "CollectSuiviLivrableFromSelectedFiles", "CollectSuiviLiv.CollectSuiviLivrableFromSelectedFiles"
+End Sub
+
+' Run macro by workbook name, then global name.
 Private Sub RunMacroSafe(ByVal actionLabel As String, ParamArray macroNames() As Variant)
     Dim i As Long
     Dim wbQualified As String

@@ -1,6 +1,6 @@
 Option Explicit
 
-' Saves current workbook, then saves a copy to a selected folder.
+' Save workbook, then save a copy to a selected folder.
 Public Sub SaveWorkbookCopyToSelectedDestination()
     Dim wsConfig As Worksheet
     Dim folderPath As String
@@ -65,7 +65,7 @@ ErrHandler:
     MsgBox "Echec de la sauvegarde de la copie : " & Err.Description, vbCritical, "Sauvegarde"
 End Sub
 
-' Finds a column index by header value in row 1.
+' Find a column index by header label.
 Private Function FindColumnByHeader(ws As Worksheet, ByVal headerName As String) As Long
     Dim lastCol As Long
     Dim c As Long
@@ -82,7 +82,7 @@ Private Function FindColumnByHeader(ws As Worksheet, ByVal headerName As String)
     FindColumnByHeader = 0
 End Function
 
-' Clears functions in "Fonctions" column in copied workbook.
+' Clear "Fonctions" values in the copied workbook.
 Private Sub ClearFunctionsInCopiedWorkbook(ByVal copyPath As String)
     Dim wbCopy As Workbook
     Dim wsCopy As Worksheet
@@ -103,7 +103,7 @@ Private Sub ClearFunctionsInCopiedWorkbook(ByVal copyPath As String)
     wbCopy.Close SaveChanges:=False
 End Sub
 
-' Removes filesystem-invalid characters from filename fragment.
+' Replace invalid filename characters.
 Private Function SanitizeFileNamePart(ByVal s As String) As String
     Dim badChars As Variant
     Dim ch As Variant

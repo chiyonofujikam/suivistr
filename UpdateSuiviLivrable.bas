@@ -37,6 +37,7 @@ Public Sub UpdateSuiviLivrable()
     Dim typeLivrables As Collection
     Dim typeLivrableFallbackResp As VbMsgBoxResult
     Dim logPath As String
+    Dim manualColsSnapshot As Object
 
     On Error GoTo ErrHandler
     lockCreated = False
@@ -90,6 +91,7 @@ Public Sub UpdateSuiviLivrable()
     vhstArr = LoadSheetData(ThisWorkbook.Sheets(SH_VHST))
 
     Set wsLiv = ThisWorkbook.Sheets(SH_LIV)
+    Set manualColsSnapshot = CaptureSuiviLivrableManualValues(wsLiv)
     lastLivCol = wsLiv.UsedRange.Column + wsLiv.UsedRange.Columns.Count - 1
     If lastLivCol < 1 Then lastLivCol = COL_Y
     lastBorderCol = lastLivCol
@@ -179,6 +181,7 @@ NextStr:
     Next strKey
 
     ' Rebuild borders and persist new snapshot state.
+    RestoreSuiviLivrableManualValues wsLiv, manualColsSnapshot
     RebuildSuiviLivrablesBorders wsLiv, lastBorderCol
     ApplySuiviLivrablesColumnFormats wsLiv
 
