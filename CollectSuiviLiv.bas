@@ -3,6 +3,9 @@ Option Explicit
 Public Sub CollectSuiviLivrableFromSelectedFiles()
     Dim dlg As Object
     Dim selectedPath As Variant
+    Dim selectedPaths As Collection
+    Dim moreResp As VbMsgBoxResult
+    Dim key As String
     Dim wbOutput As Workbook
     Dim wbSource As Workbook
     Dim wsSource As Worksheet
@@ -42,16 +45,32 @@ Public Sub CollectSuiviLivrableFromSelectedFiles()
         initiallyOpenWorkbooks.Add wb
     Next wb
 
-    Set dlg = Application.FileDialog(3)
-    With dlg
-        .Title = "Selectionner les fichiers Excel a collecter"
-        .AllowMultiSelect = True
-        .Filters.Clear
-        .Filters.Add "Fichiers Excel", "*.xls;*.xlsx;*.xlsm", 1
-        If .Show <> -1 Then Exit Sub
-        If .SelectedItems.Count = 0 Then Exit Sub
-    End With
-    totalSelected = dlg.SelectedItems.Count
+    ' Allow selecting files across multiple folders by looping the file picker.
+    Set selectedPaths = New Collection
+    Do
+        Set dlg = Application.FileDialog(3)
+        With dlg
+            .Title = "Selectionner les fichiers Excel a collecter"
+            .AllowMultiSelect = True
+            .Filters.Clear
+            .Filters.Add "Fichiers Excel", "*.xls;*.xlsx;*.xlsm", 1
+            If .Show <> -1 Then Exit Do ' Cancel: stop adding more files
+            If .SelectedItems.Count = 0 Then Exit Do
+        End With
+
+        For Each selectedPath In dlg.SelectedItems
+            key = LCase$(Replace(CStr(selectedPath), "/", "\"))
+            On Error Resume Next
+            selectedPaths.Add CStr(selectedPath), key ' keyed add prevents duplicates
+            Err.Clear
+            On Error GoTo ErrHandler
+        Next selectedPath
+
+        moreResp = MsgBox("Ajouter d'autres fichiers (dans un autre dossier) ?", vbYesNo + vbQuestion, "Collect Suivi_Livrable")
+    Loop While moreResp = vbYes
+
+    If selectedPaths.Count = 0 Then Exit Sub
+    totalSelected = selectedPaths.Count
 
     Set wbOutput = Workbooks.Add(xlWBATWorksheet)
     defaultSheetName = wbOutput.Worksheets(1).Name
@@ -66,7 +85,7 @@ Public Sub CollectSuiviLivrableFromSelectedFiles()
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
 
-    For Each selectedPath In dlg.SelectedItems
+    For Each selectedPath In selectedPaths
         shortName = BaseFileNameWithoutExtension(CStr(selectedPath))
         sourceSheetName = SH_LIV
         Set wsSource = Nothing
