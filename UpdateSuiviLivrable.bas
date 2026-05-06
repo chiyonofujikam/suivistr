@@ -1,7 +1,7 @@
 Option Explicit
 
 Public Sub UpdateSuiviLivrable()
-    ' Main orchestration: lock, rebuild Suivi_Livrables from current source sheets.
+    ' Rebuilds `Suivi_Livrables` from current sources.
     Dim lockCreated As Boolean
     Dim wsCR As Worksheet
     Dim lockValue As String
@@ -10,14 +10,11 @@ Public Sub UpdateSuiviLivrable()
     Dim uvrArr As Variant
     Dim vhstArr As Variant
     Dim configArr As Variant
-    Dim livArr As Variant
     Dim finRefCol As Long
     Dim uvrColMap As Object
     Dim maxSprintMap As Object
     Dim wsLiv As Worksheet
     Dim insertRow As Long
-    Dim bv As String, cv As String, dv As String, ev As String
-    Dim rr As Long
     Dim insertedCount As Long
     Dim totalInsertedRows As Long
     Dim strKey As Variant
@@ -26,7 +23,6 @@ Public Sub UpdateSuiviLivrable()
     Dim maxSprintKey As String
     Dim nrows As Long
     Dim br As Variant
-    Dim colI2 As Long
     Dim lastBorderCol As Long
     Dim msg As String
     Dim errNumber As Long
@@ -38,12 +34,22 @@ Public Sub UpdateSuiviLivrable()
     Dim typeLivrableFallbackResp As VbMsgBoxResult
     Dim logPath As String
     Dim manualColsSnapshot As Object
+    Dim crIndex As Object
+    Dim powqCompIndex As Object
+    Dim powqAIndex As Object
+    Dim uvrIndex As Object
+    Dim strPlans As Collection
+    Dim plan As Variant
+    Dim totalRows As Long
+    Dim bcdeArr As Variant
+    Dim blockTop As Long
+    Dim blockBottom As Long
 
     On Error GoTo ErrHandler
     lockCreated = False
     Set wsCR = ThisWorkbook.Sheets(SH_CR)
 
-    ' Acquire workbook-level lock to avoid concurrent runs.
+    ' Lock (prevent concurrent runs).
     If Trim$(CStr(wsCR.Range(LOCK_CELL_ADDR).Value & "")) <> "" Then
         WaitWhileLocked wsCR, LOCK_CELL_ADDR
     End If
@@ -72,7 +78,7 @@ Public Sub UpdateSuiviLivrable()
     If Right$(logPath, 1) <> "\" Then logPath = logPath & "\"
     logPath = logPath & ERROR_LOG_FILE
 
-    ' Validate setup and load source arrays.
+    ' Load sources.
     ValidateRequiredSheets
 
     Application.ScreenUpdating = False
@@ -126,6 +132,13 @@ Public Sub UpdateSuiviLivrable()
         GoTo Cleanup
     End If
 
+    ' Build lookup indexes.
+    Application.StatusBar = "Mise a jour Suivi : indexation des sources..."
+    Set crIndex = BuildCRIndex(crArr)
+    Set powqCompIndex = BuildPowQCompositeIndex(powqArr)
+    Set powqAIndex = BuildPowQAIndex(powqArr)
+    Set uvrIndex = BuildUVRIndex(uvrArr)
+
     Application.StatusBar = "Mise a jour Suivi : reconstruction complete de " & SH_LIV & "..."
 
     insertedCount = 0
@@ -137,50 +150,49 @@ Public Sub UpdateSuiviLivrable()
         wsLiv.Rows(LIV_FIRST_ROW & ":" & insertRow).Delete Shift:=xlUp
     End If
 
+    ' Pass 1: plan blocks and total rows.
+    Set strPlans = New Collection
+    totalRows = 0
     For Each strKey In vhstSTRMap.Keys
         Set strSprints = GetTargetSprintsForSTR(crArr, CStr(strKey), maxSprintMap)
         maxSprintKey = GetYellowSprintKeyForSTR(CStr(strKey), maxSprintMap, strSprints)
         nrows = GeneratedBlockRowCount(strSprints, fonctions, typeLivrables)
-        If nrows <= 0 Then GoTo NextStr
+        If nrows > 0 Then
+            strPlans.Add Array(CStr(strKey), strSprints, maxSprintKey, nrows)
+            totalRows = totalRows + nrows
+        End If
+    Next strKey
 
-        insertRow = GetLastDataRow(wsLiv, COL_B) + 1
-        If insertRow < LIV_FIRST_ROW Then insertRow = LIV_FIRST_ROW
-        wsLiv.Rows(insertRow & ":" & (insertRow + nrows - 1)).Insert Shift:=xlDown
-        br = InsertGeneratedSTRBlock(wsLiv, insertRow, CStr(strKey), strSprints, fonctions, typeLivrables, lastBorderCol, maxSprintKey)
+    ' Single insert for the whole rebuild.
+    If totalRows > 0 Then
+        wsLiv.Rows(LIV_FIRST_ROW & ":" & (LIV_FIRST_ROW + totalRows - 1)).Insert Shift:=xlDown
+    End If
 
-        livArr = LoadSheetData(wsLiv)
-        For rr = br(0) To br(1)
-            bv = CStr(livArr(rr, COL_B) & "")
-            cv = CStr(livArr(rr, COL_C) & "")
-            dv = CStr(livArr(rr, COL_D) & "")
-            ev = CStr(livArr(rr, COL_E) & "")
+    ' Pass 2: generate blocks and compute columns.
+    insertRow = LIV_FIRST_ROW
+    For Each plan In strPlans
+        Set strSprints = plan(1)
+        maxSprintKey = CStr(plan(2))
+        nrows = CLng(plan(3))
 
-            wsLiv.Cells(rr, COL_F).Value = ComputeColF(bv, cv, dv, ev, crArr)
-            wsLiv.Cells(rr, COL_G).Value = ComputeColG(bv, cv, dv, ev, crArr)
-            wsLiv.Cells(rr, COL_H).Value = ComputeColH(bv, cv, dv, ev, powqArr)
-            wsLiv.Cells(rr, COL_I).Value = ComputeColI(bv, cv, dv, ev, powqArr, finRefCol)
-            wsLiv.Cells(rr, COL_J).Value = ComputeColJ(bv, cv, dv, ev, powqArr)
-            wsLiv.Cells(rr, COL_M).Value = ComputeColM(bv, cv, dv, ev, powqArr)
-            wsLiv.Cells(rr, COL_K).Value = ComputeColK(bv, cv, dv, ev, crArr)
-            wsLiv.Cells(rr, COL_O).Value = ComputeColO(bv, cv, dv, ev, powqArr)
-            wsLiv.Cells(rr, COL_T).Value = ComputeColT(bv, cv, dv, ev, powqArr)
-            wsLiv.Cells(rr, COL_A).Value = ComputeColA(bv, cv, dv, ev)
+        bcdeArr = BuildSTRBlockBCDEMatrix(CStr(plan(0)), strSprints, fonctions, typeLivrables)
 
-            If maxSprintKey <> "" And NormalizeSprintKey(dv) = maxSprintKey Then
-                For colI2 = COL_U To COL_X
-                    If uvrColMap.Exists(colI2) Then
-                        wsLiv.Cells(rr, colI2).Value = ComputeUVRCell(bv, cv, ev, uvrArr, CLng(uvrColMap(colI2)), colI2)
-                    End If
-                Next colI2
-            End If
-        Next rr
+        br = InsertGeneratedSTRBlock(wsLiv, insertRow, CStr(plan(0)), strSprints, _
+                                     fonctions, typeLivrables, lastBorderCol, maxSprintKey)
+        blockTop = CLng(br(0))
+        blockBottom = CLng(br(1))
+
+        WriteSTRBlockComputedColumns wsLiv, blockTop, blockBottom, bcdeArr, _
+                                     crArr, powqArr, uvrArr, _
+                                     crIndex, powqCompIndex, powqAIndex, uvrIndex, _
+                                     finRefCol, uvrColMap, maxSprintKey
 
         insertedCount = insertedCount + 1
         totalInsertedRows = totalInsertedRows + nrows
-NextStr:
-    Next strKey
+        insertRow = insertRow + nrows
+    Next plan
 
-    ' Rebuild borders and persist new snapshot state.
+    ' Finalize formatting and restore manual columns.
     RestoreSuiviLivrableManualValues wsLiv, manualColsSnapshot
     RebuildSuiviLivrablesBorders wsLiv, lastBorderCol
     ApplySuiviLivrablesColumnFormats wsLiv
@@ -193,7 +205,7 @@ NextStr:
     GoTo Cleanup
 
 ErrHandler:
-    ' Log runtime errors and show user-facing message.
+    ' Log and report runtime errors.
     errNumber = Err.Number
     errMessage = Err.Description
     errSource = Err.Source
@@ -211,7 +223,7 @@ ErrHandler:
     Resume Cleanup
 
 Cleanup:
-    ' Always release lock and restore application settings.
+    ' Release lock and restore application settings.
     On Error Resume Next
     If lockCreated Then
         If Left$(CStr(wsCR.Range(LOCK_CELL_ADDR).Value & ""), Len(LOCK_PREFIX & Environ$("USERNAME"))) = LOCK_PREFIX & Environ$("USERNAME") Then
@@ -223,4 +235,90 @@ Cleanup:
     Application.ScreenUpdating = True
     Application.Calculation = xlCalculationAutomatic
     Application.EnableEvents = True
+End Sub
+
+' Computes derived columns for one generated block.
+Private Sub WriteSTRBlockComputedColumns(ByVal wsLiv As Worksheet, _
+                                         ByVal blockTop As Long, ByVal blockBottom As Long, _
+                                         bcdeArr As Variant, _
+                                         crArr As Variant, powqArr As Variant, uvrArr As Variant, _
+                                         crIndex As Object, powqCompIndex As Object, _
+                                         powqAIndex As Object, uvrIndex As Object, _
+                                         ByVal finRefCol As Long, _
+                                         uvrColMap As Object, _
+                                         ByVal maxSprintKey As String)
+    Dim nrows As Long
+    Dim rr As Long
+    Dim bv As String, cv As String, dv As String, ev As String
+    Dim arrA() As Variant
+    Dim arrBK() As Variant
+    Dim arrM() As Variant
+    Dim arrO() As Variant
+    Dim arrT() As Variant
+    Dim arrUX() As Variant
+    Dim hasUVR As Boolean
+    Dim isMaxSprint As Boolean
+    Dim colIdx As Long
+
+    nrows = blockBottom - blockTop + 1
+    If nrows <= 0 Then Exit Sub
+
+    ReDim arrA(1 To nrows, 1 To 1)
+    ReDim arrBK(1 To nrows, 1 To 10) ' covers B(2) .. K(11)
+    ReDim arrM(1 To nrows, 1 To 1)
+    ReDim arrO(1 To nrows, 1 To 1)
+    ReDim arrT(1 To nrows, 1 To 1)
+    ReDim arrUX(1 To nrows, 1 To 4) ' covers U(21) .. X(24)
+
+    hasUVR = False
+    If Not uvrColMap Is Nothing Then
+        hasUVR = (uvrColMap.Count > 0)
+    End If
+
+    For rr = 1 To nrows
+        bv = CStr(bcdeArr(rr, 1) & "")
+        cv = CStr(bcdeArr(rr, 2) & "")
+        dv = CStr(bcdeArr(rr, 3) & "")
+        ev = CStr(bcdeArr(rr, 4) & "")
+
+        arrA(rr, 1) = ComputeColA(bv, cv, dv, ev)
+
+        ' B/C/D/E (stable keys).
+        arrBK(rr, 1) = bv
+        arrBK(rr, 2) = cv
+        arrBK(rr, 3) = dv
+        arrBK(rr, 4) = ev
+        arrBK(rr, 5) = ComputeColFFast(bv, cv, dv, ev, crArr, crIndex)
+        arrBK(rr, 6) = ComputeColGFast(bv, cv, dv, ev, crArr, crIndex)
+        arrBK(rr, 7) = ComputeColHFast(bv, cv, dv, ev, powqArr, powqCompIndex)
+        arrBK(rr, 8) = ComputeColIFast(bv, cv, dv, ev, powqArr, finRefCol, powqAIndex)
+        arrBK(rr, 9) = ComputeColJFast(bv, cv, dv, ev, powqArr, powqCompIndex)
+        arrBK(rr, 10) = ComputeColKFast(bv, cv, dv, ev, crArr, crIndex)
+
+        arrM(rr, 1) = ComputeColMFast(bv, cv, dv, ev, powqArr, powqAIndex)
+        arrO(rr, 1) = ComputeColOFast(bv, cv, dv, ev, powqArr, powqAIndex)
+        arrT(rr, 1) = ComputeColTFast(bv, cv, dv, ev, powqArr, powqAIndex)
+
+        If hasUVR And maxSprintKey <> "" Then
+            isMaxSprint = (NormalizeSprintKey(dv) = maxSprintKey)
+            If isMaxSprint Then
+                For colIdx = COL_U To COL_X
+                    If uvrColMap.Exists(colIdx) Then
+                        arrUX(rr, colIdx - COL_U + 1) = ComputeUVRCellFast( _
+                            bv, cv, ev, uvrArr, CLng(uvrColMap(colIdx)), colIdx, uvrIndex)
+                    End If
+                Next colIdx
+            End If
+        End If
+    Next rr
+
+    ' Bulk writes (leave L/N/P/Q/R/S/Y to snapshot restore).
+    wsLiv.Range(wsLiv.Cells(blockTop, COL_A), wsLiv.Cells(blockBottom, COL_A)).Value = arrA
+    wsLiv.Range(wsLiv.Cells(blockTop, COL_B), wsLiv.Cells(blockBottom, COL_K)).Value = arrBK
+    wsLiv.Range(wsLiv.Cells(blockTop, COL_M), wsLiv.Cells(blockBottom, COL_M)).Value = arrM
+    wsLiv.Range(wsLiv.Cells(blockTop, COL_O), wsLiv.Cells(blockBottom, COL_O)).Value = arrO
+    wsLiv.Range(wsLiv.Cells(blockTop, COL_T), wsLiv.Cells(blockBottom, COL_T)).Value = arrT
+    If hasUVR And maxSprintKey <> "" Then
+        wsLiv.Range(wsLiv.Cells(blockTop, COL_U), wsLiv.Cells(blockBottom, COL_X)).Value = arrUX
+    End If
 End Sub

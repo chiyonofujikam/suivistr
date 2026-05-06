@@ -1421,6 +1421,475 @@ Public Function ComputeColT(B As String, C As String, D As String, _
     ComputeColT = ""
 End Function
 
+' Source indexes for the Suivi_Livrables rebuild.
+
+' CR index by B|C|D (values = row indexes).
+Public Function BuildCRIndex(crArr As Variant) As Object
+    Dim dict As Object
+    Dim r As Long
+    Dim k As String
+    Dim coll As Collection
+    Dim lastRow As Long
+
+    Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbBinaryCompare
+
+    On Error Resume Next
+    lastRow = UBound(crArr, 1)
+    On Error GoTo 0
+    If lastRow < CR_FIRST_ROW Then
+        Set BuildCRIndex = dict
+        Exit Function
+    End If
+
+    For r = CR_FIRST_ROW To lastRow
+        k = LCase(CStr(crArr(r, COL_B) & "")) & "|" & _
+            LCase(CStr(crArr(r, COL_C) & "")) & "|" & _
+            LCase(CStr(crArr(r, COL_D) & ""))
+        If dict.Exists(k) Then
+            Set coll = dict(k)
+        Else
+            Set coll = New Collection
+            dict.Add k, coll
+        End If
+        coll.Add r
+    Next r
+    Set BuildCRIndex = dict
+End Function
+
+' PowQ index by B|C|F|U (values = row indexes).
+Public Function BuildPowQCompositeIndex(powqArr As Variant) As Object
+    Dim dict As Object
+    Dim r As Long
+    Dim k As String
+    Dim coll As Collection
+    Dim lastRow As Long
+
+    Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbBinaryCompare
+
+    On Error Resume Next
+    lastRow = UBound(powqArr, 1)
+    On Error GoTo 0
+    If lastRow < 2 Then
+        Set BuildPowQCompositeIndex = dict
+        Exit Function
+    End If
+
+    For r = 2 To lastRow
+        k = LCase(CStr(powqArr(r, COL_B) & "")) & "|" & _
+            LCase(CStr(powqArr(r, COL_C) & "")) & "|" & _
+            LCase(CStr(powqArr(r, COL_F) & "")) & "|" & _
+            LCase(CStr(powqArr(r, COL_U) & ""))
+        If dict.Exists(k) Then
+            Set coll = dict(k)
+        Else
+            Set coll = New Collection
+            dict.Add k, coll
+        End If
+        coll.Add r
+    Next r
+    Set BuildPowQCompositeIndex = dict
+End Function
+
+' PowQ index by A (value = first row).
+Public Function BuildPowQAIndex(powqArr As Variant) As Object
+    Dim dict As Object
+    Dim r As Long
+    Dim k As String
+    Dim lastRow As Long
+
+    Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbBinaryCompare
+
+    On Error Resume Next
+    lastRow = UBound(powqArr, 1)
+    On Error GoTo 0
+    If lastRow < 2 Then
+        Set BuildPowQAIndex = dict
+        Exit Function
+    End If
+
+    For r = 2 To lastRow
+        k = LCase(CStr(powqArr(r, COL_A) & ""))
+        If Not dict.Exists(k) Then dict.Add k, r
+    Next r
+    Set BuildPowQAIndex = dict
+End Function
+
+' UVR index by col(1) (value = first row).
+Public Function BuildUVRIndex(uvrArr As Variant) As Object
+    Dim dict As Object
+    Dim r As Long
+    Dim k As String
+    Dim lastRow As Long
+
+    Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbBinaryCompare
+
+    On Error Resume Next
+    lastRow = UBound(uvrArr, 1)
+    On Error GoTo 0
+    If lastRow < 2 Then
+        Set BuildUVRIndex = dict
+        Exit Function
+    End If
+
+    For r = 2 To lastRow
+        k = LCase(CStr(uvrArr(r, 1) & ""))
+        If Not dict.Exists(k) Then dict.Add k, r
+    Next r
+    Set BuildUVRIndex = dict
+End Function
+
+' Fast ComputeCol* variants using the indexes above.
+
+' ComputeColF with CR index.
+Public Function ComputeColFFast(B As String, C As String, D As String, E As String, _
+                                crArr As Variant, crIndex As Object) As Long
+    Dim cnt As Long
+    Dim r As Long
+    Dim valueCol As Long
+    Dim k As String
+    Dim coll As Collection
+    Dim rowVar As Variant
+
+    valueCol = COL_J
+    If LCase(Trim$(C)) = LCase(TYPE_LIVRABLE_SWDS) Then valueCol = COL_L
+
+    k = LCase(B) & "|" & LCase(D) & "|" & LCase(E)
+    If Not crIndex.Exists(k) Then
+        ComputeColFFast = 0
+        Exit Function
+    End If
+
+    Set coll = crIndex(k)
+    For Each rowVar In coll
+        r = CLng(rowVar)
+        If CStr(crArr(r, valueCol) & "") <> "" Then cnt = cnt + 1
+    Next rowVar
+    ComputeColFFast = cnt
+End Function
+
+' ComputeColG with CR index.
+Public Function ComputeColGFast(B As String, C As String, D As String, E As String, _
+                                crArr As Variant, crIndex As Object) As Long
+    Dim cnt As Long
+    Dim r As Long
+    Dim lBloque As String
+    Dim valueCol As Long
+    Dim k As String
+    Dim coll As Collection
+    Dim rowVar As Variant
+    Dim gv As String
+
+    lBloque = LCase("Bloqu" & ChrW(233))
+    valueCol = COL_J
+    If LCase(Trim$(C)) = LCase(TYPE_LIVRABLE_SWDS) Then valueCol = COL_L
+
+    k = LCase(B) & "|" & LCase(D) & "|" & LCase(E)
+    If Not crIndex.Exists(k) Then
+        ComputeColGFast = 0
+        Exit Function
+    End If
+
+    Set coll = crIndex(k)
+    For Each rowVar In coll
+        r = CLng(rowVar)
+        If CStr(crArr(r, valueCol) & "") <> "" Then
+            gv = LCase(CStr(crArr(r, COL_G) & ""))
+            If gv = lBloque Or gv = BLOCKED_FR Then cnt = cnt + 1
+        End If
+    Next rowVar
+    ComputeColGFast = cnt
+End Function
+
+' ComputeColH with PowQ index.
+Public Function ComputeColHFast(B As String, C As String, D As String, E As String, _
+                                powqArr As Variant, powqCompIndex As Object) As Double
+    Dim total As Double
+    Dim r As Long
+    Dim k As String
+    Dim coll As Collection
+    Dim rowVar As Variant
+    Dim v As Variant
+
+    k = LCase(B) & "|" & LCase(E) & "|" & LCase(C) & "|" & LCase(D)
+    If Not powqCompIndex.Exists(k) Then
+        ComputeColHFast = 0
+        Exit Function
+    End If
+
+    Set coll = powqCompIndex(k)
+    For Each rowVar In coll
+        r = CLng(rowVar)
+        v = powqArr(r, COL_Y)
+        If IsValidPowQValue(v) And IsNumeric(v) Then
+            total = total + CDbl(v)
+        End If
+    Next rowVar
+    ComputeColHFast = total
+End Function
+
+' ComputeColI with PowQ(A) index.
+Public Function ComputeColIFast(B As String, C As String, D As String, E As String, _
+                                powqArr As Variant, ByVal finRefCol As Long, _
+                                powqAIndex As Object) As Variant
+    Dim lookupKey As String
+    Dim lKey As String
+    Dim r As Long
+
+    If finRefCol = 0 Then
+        ComputeColIFast = ""
+        Exit Function
+    End If
+
+    lookupKey = B & "/" & E & "/" & C & "/Sprint " & D
+    lKey = LCase(lookupKey)
+
+    If Not powqAIndex.Exists(lKey) Then
+        ComputeColIFast = ""
+        Exit Function
+    End If
+
+    r = CLng(powqAIndex(lKey))
+    If IsValidPowQValue(powqArr(r, finRefCol)) Then
+        ComputeColIFast = powqArr(r, finRefCol)
+    Else
+        ComputeColIFast = ""
+    End If
+End Function
+
+' ComputeColJ with PowQ index.
+Public Function ComputeColJFast(B As String, C As String, D As String, E As String, _
+                                powqArr As Variant, powqCompIndex As Object) As Variant
+    Dim maxVal As Double
+    Dim found As Boolean
+    Dim r As Long
+    Dim numVal As Double
+    Dim isSwds As Boolean
+    Dim v As Variant
+    Dim k As String
+    Dim coll As Collection
+    Dim rowVar As Variant
+
+    isSwds = (LCase(Trim$(C)) = LCase(TYPE_LIVRABLE_SWDS))
+
+    k = LCase(B) & "|" & LCase(E) & "|" & LCase(C) & "|" & LCase(D)
+    If Not powqCompIndex.Exists(k) Then
+        ComputeColJFast = ""
+        Exit Function
+    End If
+
+    Set coll = powqCompIndex(k)
+    For Each rowVar In coll
+        r = CLng(rowVar)
+        v = powqArr(r, COL_I)
+        If Not IsEmpty(v) And Not IsError(v) Then
+            If IsDate(v) Or IsNumeric(v) Then
+                numVal = CDbl(v)
+                If isSwds Then
+                    If numVal <> 0 Then
+                        If (Not found) Or numVal > maxVal Then
+                            maxVal = numVal
+                            found = True
+                        End If
+                    End If
+                Else
+                    If (Not found) Or numVal > maxVal Then
+                        maxVal = numVal
+                        found = True
+                    End If
+                End If
+            End If
+        End If
+    Next rowVar
+
+    If found Then
+        ComputeColJFast = CDate(maxVal)
+    Else
+        ComputeColJFast = ""
+    End If
+End Function
+
+' ComputeColK with CR index.
+Public Function ComputeColKFast(B As String, C As String, D As String, E As String, _
+                                crArr As Variant, crIndex As Object) As Double
+    Dim total As Double
+    Dim cnt As Long
+    Dim r As Long
+    Dim k As String
+    Dim coll As Collection
+    Dim rowVar As Variant
+    Dim valueCol As Long
+    Dim useIt As Boolean
+
+    If B = "" Then
+        ComputeColKFast = 0
+        Exit Function
+    End If
+
+    useIt = False
+    If LCase(C) = LCase(TYPE_LIVRABLE_ADL1) Then
+        valueCol = COL_J
+        useIt = True
+    ElseIf LCase(C) = LCase(TYPE_LIVRABLE_SWDS) Or LCase(C) = "reprise suite valid" Then
+        valueCol = COL_L
+        useIt = True
+    End If
+    If Not useIt Then
+        ComputeColKFast = 0
+        Exit Function
+    End If
+
+    k = LCase(B) & "|" & LCase(D) & "|" & LCase(E)
+    If Not crIndex.Exists(k) Then
+        ComputeColKFast = 0
+        Exit Function
+    End If
+
+    Set coll = crIndex(k)
+    For Each rowVar In coll
+        r = CLng(rowVar)
+        If CStr(crArr(r, valueCol) & "") <> "" Then
+            total = total + CDblSafe(crArr(r, valueCol))
+            cnt = cnt + 1
+        End If
+    Next rowVar
+
+    If cnt > 0 Then
+        ComputeColKFast = total / cnt
+    Else
+        ComputeColKFast = 0
+    End If
+End Function
+
+' ComputeColM with PowQ(A) index.
+Public Function ComputeColMFast(B As String, C As String, D As String, E As String, _
+                                powqArr As Variant, powqAIndex As Object) As Variant
+    Dim lookupKey As String
+    Dim lKey As String
+    Dim r As Long
+
+    lookupKey = B & "/" & E & "/Reprise suite valid/Sprint " & D
+    lKey = LCase(lookupKey)
+
+    If Not powqAIndex.Exists(lKey) Then
+        ComputeColMFast = ""
+        Exit Function
+    End If
+
+    r = CLng(powqAIndex(lKey))
+    If IsValidPowQValue(powqArr(r, COL_I)) Then
+        ComputeColMFast = powqArr(r, COL_I)
+    Else
+        ComputeColMFast = ""
+    End If
+End Function
+
+' ComputeColO with PowQ(A) index.
+Public Function ComputeColOFast(B As String, C As String, D As String, E As String, _
+                                powqArr As Variant, powqAIndex As Object) As Variant
+    Dim lookupKey As String
+    Dim lKey As String
+    Dim r As Long
+
+    lookupKey = B & "/" & E & "/UVR " & C & "/Sprint " & D
+    lKey = LCase(lookupKey)
+
+    If Not powqAIndex.Exists(lKey) Then
+        ComputeColOFast = ""
+        Exit Function
+    End If
+
+    r = CLng(powqAIndex(lKey))
+    If IsValidPowQValue(powqArr(r, COL_I)) Then
+        ComputeColOFast = powqArr(r, COL_I)
+    Else
+        ComputeColOFast = ""
+    End If
+End Function
+
+' ComputeColT with PowQ(A) index.
+Public Function ComputeColTFast(B As String, C As String, D As String, E As String, _
+                                powqArr As Variant, powqAIndex As Object) As Variant
+    Dim lookupKey As String
+    Dim lKey As String
+    Dim r As Long
+
+    lookupKey = B & "/" & E & "/UVR " & C & " OK/Sprint " & D
+    lKey = LCase(lookupKey)
+
+    If Not powqAIndex.Exists(lKey) Then
+        ComputeColTFast = ""
+        Exit Function
+    End If
+
+    r = CLng(powqAIndex(lKey))
+    If IsValidPowQValue(powqArr(r, COL_I)) Then
+        ComputeColTFast = powqArr(r, COL_I)
+    Else
+        ComputeColTFast = ""
+    End If
+End Function
+
+' ComputeUVRCell with UVR index.
+Public Function ComputeUVRCellFast(B As String, C As String, E As String, _
+                                   uvrArr As Variant, ByVal uvrColIdx As Long, _
+                                   ByVal destColIdx As Long, _
+                                   uvrIndex As Object) As Variant
+    Dim lookupKey As String
+    Dim r As Long
+    Dim v As Variant
+
+    lookupKey = LCase(B & " " & E & " " & C)
+
+    If Not uvrIndex.Exists(lookupKey) Then
+        ComputeUVRCellFast = NormalizeUVRCellByDestCol(Empty, destColIdx)
+        Exit Function
+    End If
+
+    r = CLng(uvrIndex(lookupKey))
+    v = uvrArr(r, uvrColIdx)
+    ComputeUVRCellFast = NormalizeUVRCellByDestCol(v, destColIdx)
+End Function
+
+' Builds the B/C/D/E matrix for one generated STR block.
+Public Function BuildSTRBlockBCDEMatrix(ByVal strKey As String, _
+                                        strSprints As Collection, _
+                                        fonctions As Collection, _
+                                        typeLivrables As Collection) As Variant
+    Dim nrows As Long
+    Dim arr() As Variant
+    Dim rowPtr As Long
+    Dim sp As Variant
+    Dim fn As Variant
+    Dim typeLivrable As Variant
+
+    nrows = CLng(typeLivrables.Count) * CLng(strSprints.Count) * CLng(fonctions.Count)
+    If nrows <= 0 Then
+        ReDim arr(1 To 1, 1 To 4)
+        BuildSTRBlockBCDEMatrix = arr
+        Exit Function
+    End If
+
+    ReDim arr(1 To nrows, 1 To 4)
+    rowPtr = 1
+    For Each typeLivrable In typeLivrables
+        For Each sp In strSprints
+            For Each fn In fonctions
+                arr(rowPtr, 1) = strKey
+                arr(rowPtr, 2) = CStr(typeLivrable)
+                arr(rowPtr, 3) = CStr(sp)
+                arr(rowPtr, 4) = CStr(fn)
+                rowPtr = rowPtr + 1
+            Next fn
+        Next sp
+    Next typeLivrable
+
+    BuildSTRBlockBCDEMatrix = arr
+End Function
+
 ' Checks whether a sheet exists in current workbook.
 Public Function SheetExists(shName As String) As Boolean
     Dim ws As Worksheet
