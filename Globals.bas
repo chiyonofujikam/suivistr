@@ -35,7 +35,6 @@ Public Const LOCK_SEPARATOR As String = " at "
 Public Const LOCK_DATE_FORMAT As String = "YYYY-MM-DD HH:NN:SS"
 Public Const LOCK_STALE_MINUTES As Double = 30#
 Public Const PROTECT_PASSWORD As String = "suivi_update"
-Public Const ERROR_LOG_FILE As String = "error_logs.txt"
 
 ' BN archive constants.
 Public Const ARCHIVE_ROOT_FOLDER As String = "Archived\"

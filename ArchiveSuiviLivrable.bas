@@ -9,6 +9,7 @@ Public Sub ArchiveSuiviLivrable()
     Dim wsNew As Worksheet
     Dim srcRng As Range
     Dim dstRng As Range
+    Dim saveRoot As String
     Dim folderPath As String
     Dim fileName As String
     Dim fullPath As String
@@ -16,13 +17,13 @@ Public Sub ArchiveSuiviLivrable()
     Dim dayFolder As String
     Dim resp As VbMsgBoxResult
     Dim confirmResp As VbMsgBoxResult
+    Dim dlg As Object
     Dim shp As Shape
     Dim lastRow As Long
     Dim lastCol As Long
     Dim c As Long
     Dim r As Long
     Dim errLine As String
-    Dim sharedFolderPath As String
 
     If m_ArchiveRunning Then Exit Sub
     m_ArchiveRunning = True
@@ -39,31 +40,6 @@ Public Sub ArchiveSuiviLivrable()
                          "Cette action va sauvegarder l'etat actuel puis vider les lignes actives de la feuille.", _
                          vbYesNo + vbQuestion + vbDefaultButton2, "Confirmation archivage")
     If confirmResp <> vbYes Then GoTo Cleanup
-
-    On Error Resume Next
-    sharedFolderPath = SHARED_FOLDER_PATH(False)
-    If Err.Number <> 0 Or Trim$(sharedFolderPath) = "" Then
-        Err.Clear
-        On Error GoTo ErrHandler
-        MsgBox "La selection du dossier partage n'a pas ete finalisee correctement." & vbCrLf & _
-               "L'archivage est annule.", vbExclamation, "Archivage"
-        GoTo Cleanup
-    End If
-    On Error GoTo ErrHandler
-    If Right$(sharedFolderPath, 1) <> "\" Then sharedFolderPath = sharedFolderPath & "\"
-
-    folderPath = sharedFolderPath & "Archived\"
-    If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
-
-    folderPath = folderPath & "Suivi_Livrable\"
-    If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
-
-    dayFolder = folderPath & Format$(Date, "DDMMYYYY") & "\"
-    If Dir$(dayFolder, vbDirectory) = "" Then MkDir dayFolder
-
-    ts = Format(Now, "DDMMYYYY_HHMMSS")
-    fileName = "Suivi_Livrable_" & ts & ".xlsx"
-    fullPath = dayFolder & fileName
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
@@ -102,6 +78,29 @@ Public Sub ArchiveSuiviLivrable()
         shp.Delete
     Next shp
 
+    ' Ask for destination folder at the end (just before saving).
+    Set dlg = Application.FileDialog(FILE_DIALOG_FOLDER_PICKER)
+    With dlg
+        .Title = "Selectionner le dossier de sauvegarde de l'archive"
+        .ButtonName = "Sauvegarder"
+        If .Show <> -1 Then GoTo Cleanup
+        saveRoot = CStr(.SelectedItems(1))
+    End With
+    If Right$(saveRoot, 1) <> "\" Then saveRoot = saveRoot & "\"
+
+    folderPath = saveRoot & ARCHIVE_ROOT_FOLDER
+    If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
+
+    folderPath = folderPath & "Suivi_Livrable\"
+    If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
+
+    dayFolder = folderPath & Format$(Date, DATE_FOLDER_FORMAT) & "\"
+    If Dir$(dayFolder, vbDirectory) = "" Then MkDir dayFolder
+
+    ts = Format$(Now, TS_FILE_FORMAT)
+    fileName = "Suivi_Livrable_" & ts & ".xlsx"
+    fullPath = dayFolder & fileName
+
     wbNew.SaveAs fileName:=fullPath, _
                   FileFormat:=xlOpenXMLWorkbook, _
                   CreateBackup:=False
@@ -135,9 +134,7 @@ ErrHandler:
               " | err=" & Err.Number & _
               " | " & Err.Description
     On Error Resume Next
-    If Trim$(sharedFolderPath) <> "" Then
-        AppendTextFile sharedFolderPath & "error_logs.txt", errLine
-    End If
+    LogErrorToSheet Err.Number, "ArchiveSuiviLivrable", Err.Description, Now
     Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True

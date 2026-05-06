@@ -1,43 +1,97 @@
 Option Explicit
 
-Private m_SharedFolder As String
-
 #If VBA7 Then
     Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As LongPtr)
 #Else
     Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
 #End If
 
-' Gets and caches the shared folder selected by the user.
-Public Function SHARED_FOLDER_PATH(Optional ByVal raiseIfMissing As Boolean = True) As String
-    Dim dlg As Object
-    Dim p As String
+Public Sub LogErrorToSheet(ByVal errNumber As Long, ByVal errSource As String, ByVal errDescription As String, _
+                           Optional ByVal errTime As Date = 0)
+    Dim ws As Worksheet
+    Dim lo As ListObject
+    Dim lr As ListRow
+    Dim t As Date
 
-    If m_SharedFolder <> "" Then
-        SHARED_FOLDER_PATH = m_SharedFolder
-        Exit Function
+    If errTime = 0 Then
+        t = Now
+    Else
+        t = errTime
     End If
 
-    Set dlg = Application.FileDialog(FILE_DIALOG_FOLDER_PICKER)
-    With dlg
-        .Title = "Select the shared folder for Suivi files (Archived\, error_logs.txt)"
-        .ButtonName = "Select"
-        If .Show = -1 Then
-            p = .SelectedItems(1)
-            If Right$(p, 1) <> "\" Then p = p & "\"
-            m_SharedFolder = p
-        Else
-            If raiseIfMissing Then
-                Err.Raise vbObjectError + 1, "SHARED_FOLDER_PATH", _
-                    "Aucun dossier partage selectionne. La mise a jour est annulee."
-            Else
-                SHARED_FOLDER_PATH = ""
-                Exit Function
-            End If
-        End If
-    End With
+    Set ws = EnsureErrorLogsSheet()
+    Set lo = EnsureErrorLogsTable(ws)
 
-    SHARED_FOLDER_PATH = m_SharedFolder
+    Set lr = lo.ListRows.Add
+    lr.Range.Cells(1, 1).Value = t
+    lr.Range.Cells(1, 2).Value = Environ$("USERNAME")
+    lr.Range.Cells(1, 3).Value = errNumber
+    lr.Range.Cells(1, 4).Value = errSource
+    lr.Range.Cells(1, 5).Value = errDescription
+End Sub
+
+Private Function EnsureErrorLogsSheet() As Worksheet
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("ERROR_LOGS")
+    On Error GoTo 0
+
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        ws.Name = "ERROR_LOGS"
+    End If
+
+    ' Keep it as the first worksheet when possible.
+    On Error Resume Next
+    If ThisWorkbook.Worksheets.Count > 0 Then
+        If ws.Index <> 1 Then ws.Move Before:=ThisWorkbook.Worksheets(1)
+    End If
+    Err.Clear
+    On Error GoTo 0
+
+    ' Always keep the log sheet hidden.
+    On Error Resume Next
+    ws.Visible = xlSheetHidden
+    Err.Clear
+    On Error GoTo 0
+
+    Set EnsureErrorLogsSheet = ws
+End Function
+
+Private Function EnsureErrorLogsTable(ByVal ws As Worksheet) As ListObject
+    Dim lo As ListObject
+    Dim hdr As Variant
+    Dim lastRow As Long
+
+    On Error Resume Next
+    Set lo = ws.ListObjects("tblERROR_LOGS")
+    On Error GoTo 0
+
+    If lo Is Nothing Then
+        hdr = Array("time", "user", "err number", "src", "description")
+        ws.Range("A1:E1").Value = hdr
+        ws.Range("A1:E1").Font.Bold = True
+        Set lo = ws.ListObjects.Add(xlSrcRange, ws.Range("A1:E2"), , xlYes)
+        lo.Name = "tblERROR_LOGS"
+        lo.TableStyle = "TableStyleLight9"
+        If lo.ListRows.Count > 0 Then lo.ListRows(1).Delete
+        ws.Columns("A:E").EntireColumn.AutoFit
+    Else
+        lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+        If lastRow < 1 Then lastRow = 1
+        lo.Resize ws.Range(ws.Cells(1, 1), ws.Cells(Application.Max(1, lastRow), 5))
+    End If
+
+    ' Best-effort formatting (may fail on protected sheets).
+    On Error Resume Next
+    If Not lo Is Nothing Then
+        lo.ListColumns(1).Range.NumberFormat = "yyyy-mm-dd hh:nn:ss"
+    Else
+        ws.Columns(1).NumberFormat = "yyyy-mm-dd hh:nn:ss"
+    End If
+    Err.Clear
+    On Error GoTo 0
+    Set EnsureErrorLogsTable = lo
 End Function
 
 ' Validates that required workbook sheets exist.

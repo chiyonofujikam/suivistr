@@ -9,6 +9,7 @@ Public Sub ArchiveBNSuivi()
     Dim wsNew As Worksheet
     Dim srcRng As Range
     Dim dstRng As Range
+    Dim saveRoot As String
     Dim folderPath As String
     Dim dayFolder As String
     Dim fileName As String
@@ -16,13 +17,13 @@ Public Sub ArchiveBNSuivi()
     Dim ts As String
     Dim confirmResp As VbMsgBoxResult
     Dim resp As VbMsgBoxResult
+    Dim dlg As Object
     Dim shp As Shape
     Dim lastRow As Long
     Dim lastCol As Long
     Dim c As Long
     Dim r As Long
     Dim errLine As String
-    Dim sharedFolderPath As String
 
     If m_ArchiveBNRunning Then Exit Sub
     m_ArchiveBNRunning = True
@@ -39,19 +40,17 @@ Public Sub ArchiveBNSuivi()
                          vbYesNo + vbQuestion + vbDefaultButton2, "Confirmation archivage")
     If confirmResp <> vbYes Then GoTo Cleanup
 
-    On Error Resume Next
-    sharedFolderPath = SHARED_FOLDER_PATH(False)
-    If Err.Number <> 0 Or Trim$(sharedFolderPath) = "" Then
-        Err.Clear
-        On Error GoTo ErrHandler
-        MsgBox "La selection du dossier partage n'a pas ete finalisee correctement." & vbCrLf & _
-               "L'archivage est annule.", vbExclamation, "Archivage BN_Suivi"
-        GoTo Cleanup
-    End If
-    On Error GoTo ErrHandler
-    If Right$(sharedFolderPath, 1) <> "\" Then sharedFolderPath = sharedFolderPath & "\"
+    ' Ask for destination folder at the end (just before saving).
+    Set dlg = Application.FileDialog(FILE_DIALOG_FOLDER_PICKER)
+    With dlg
+        .Title = "Selectionner le dossier de sauvegarde de l'archive"
+        .ButtonName = "Sauvegarder"
+        If .Show <> -1 Then GoTo Cleanup
+        saveRoot = CStr(.SelectedItems(1))
+    End With
+    If Right$(saveRoot, 1) <> "\" Then saveRoot = saveRoot & "\"
 
-    folderPath = sharedFolderPath & ARCHIVE_ROOT_FOLDER
+    folderPath = saveRoot & ARCHIVE_ROOT_FOLDER
     If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
 
     folderPath = folderPath & ARCHIVE_BN_FOLDER
@@ -131,9 +130,7 @@ ErrHandler:
               " | err=" & Err.Number & _
               " | " & Err.Description
     On Error Resume Next
-    If Trim$(sharedFolderPath) <> "" Then
-        AppendTextFile sharedFolderPath & ERROR_LOG_FILE, errLine
-    End If
+    LogErrorToSheet Err.Number, "ArchiveBNSuivi", Err.Description, Now
     Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True

@@ -32,7 +32,6 @@ Public Sub UpdateSuiviLivrable()
     Dim fonctions As Collection
     Dim typeLivrables As Collection
     Dim typeLivrableFallbackResp As VbMsgBoxResult
-    Dim logPath As String
     Dim manualColsSnapshot As Object
     Dim crIndex As Object
     Dim powqCompIndex As Object
@@ -64,19 +63,6 @@ Public Sub UpdateSuiviLivrable()
 
     wsCR.Range(LOCK_CELL_ADDR).Locked = False
     wsCR.Protect Password:=PROTECT_PASSWORD, UserInterfaceOnly:=False
-
-    On Error Resume Next
-    logPath = SHARED_FOLDER_PATH(False)
-    If Err.Number <> 0 Or Trim$(logPath) = "" Then
-        Err.Clear
-        On Error GoTo ErrHandler
-        MsgBox "La selection du dossier partage n'a pas ete finalisee correctement." & vbCrLf & _
-               "La mise a jour est annulee.", vbExclamation, "Mise a jour Suivi"
-        GoTo Cleanup
-    End If
-    On Error GoTo ErrHandler
-    If Right$(logPath, 1) <> "\" Then logPath = logPath & "\"
-    logPath = logPath & ERROR_LOG_FILE
 
     ' Load sources.
     ValidateRequiredSheets
@@ -211,12 +197,7 @@ ErrHandler:
     errSource = Err.Source
 
     On Error Resume Next
-    AppendTextFile logPath, _
-        Format$(Now, LOCK_DATE_FORMAT) & _
-        " | user=" & Environ$("USERNAME") & _
-        " | err=" & errNumber & _
-        " | src=" & errSource & _
-        " | " & errMessage
+    LogErrorToSheet errNumber, errSource, errMessage, Now
 
     MsgBox "Echec de la mise a jour : " & errMessage & _
            " (Erreur " & errNumber & ")", vbCritical, "Mise a jour Suivi"
