@@ -10,6 +10,11 @@ Public Sub Ribbon_UpdateSuivi(ByVal control As Object)
     RunMacroSafe "Mise a jour", "UpdateSuiviLivrable", "UpdateSuiviLivrable.UpdateSuiviLivrable"
 End Sub
 
+' K-only update ribbon action.
+Public Sub Ribbon_UpdateSLAvancement(ByVal control As Object)
+    RunMacroSafe "MAJ Avancement", "UpdateSLAvancement", "UpdateSLAvancement.UpdateSLAvancement"
+End Sub
+
 ' Archive Suivi ribbon action.
 Public Sub Ribbon_ArchiveSuivi(ByVal control As Object)
     RunMacroSafe "Archivage", "ArchiveSuiviLivrable", "ArchiveSuiviLivrable.ArchiveSuiviLivrable"
@@ -65,16 +70,19 @@ Private Sub RunMacroSafe(ByVal actionLabel As String, ParamArray macroNames() As
         wbQualified = "'" & ThisWorkbook.Name & "'!" & CStr(macroNames(i))
         Application.Run wbQualified
         If Err.Number = 0 Then Exit Sub
+        ReleaseSuiviCRLockIfOwned
         lastErr = Err.Description
         Err.Clear
 
         Application.Run CStr(macroNames(i))
         If Err.Number = 0 Then Exit Sub
+        ReleaseSuiviCRLockIfOwned
         lastErr = Err.Description
         Err.Clear
         On Error GoTo 0
     Next i
 
+    ReleaseSuiviCRLockIfOwned
     MsgBox "Impossible d'executer l'action '" & actionLabel & "'." & vbCrLf & _
            "Macros testees: " & tested & vbCrLf & vbCrLf & _
            "Detail: " & lastErr, vbExclamation, "Ribbon - Macro introuvable"

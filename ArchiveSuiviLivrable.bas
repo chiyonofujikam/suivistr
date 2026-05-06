@@ -10,11 +10,9 @@ Public Sub ArchiveSuiviLivrable()
     Dim srcRng As Range
     Dim dstRng As Range
     Dim saveRoot As String
-    Dim folderPath As String
     Dim fileName As String
     Dim fullPath As String
     Dim ts As String
-    Dim dayFolder As String
     Dim resp As VbMsgBoxResult
     Dim confirmResp As VbMsgBoxResult
     Dim dlg As Object
@@ -87,19 +85,9 @@ Public Sub ArchiveSuiviLivrable()
         saveRoot = CStr(.SelectedItems(1))
     End With
     If Right$(saveRoot, 1) <> "\" Then saveRoot = saveRoot & "\"
-
-    folderPath = saveRoot & ARCHIVE_ROOT_FOLDER
-    If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
-
-    folderPath = folderPath & "Suivi_Livrable\"
-    If Dir$(folderPath, vbDirectory) = "" Then MkDir folderPath
-
-    dayFolder = folderPath & Format$(Date, DATE_FOLDER_FORMAT) & "\"
-    If Dir$(dayFolder, vbDirectory) = "" Then MkDir dayFolder
-
     ts = Format$(Now, TS_FILE_FORMAT)
     fileName = "Suivi_Livrable_" & ts & ".xlsx"
-    fullPath = dayFolder & fileName
+    fullPath = saveRoot & fileName
 
     wbNew.SaveAs fileName:=fullPath, _
                   FileFormat:=xlOpenXMLWorkbook, _

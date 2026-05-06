@@ -33,12 +33,12 @@ End Sub
 Private Function EnsureErrorLogsSheet() As Worksheet
     Dim ws As Worksheet
     On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets("ERROR_LOGS")
+    Set ws = ThisWorkbook.Worksheets(SH_ERROR_LOGS)
     On Error GoTo 0
 
     If ws Is Nothing Then
         Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-        ws.Name = "ERROR_LOGS"
+        ws.Name = SH_ERROR_LOGS
     End If
 
     ' Keep it as the first worksheet when possible.
@@ -64,15 +64,15 @@ Private Function EnsureErrorLogsTable(ByVal ws As Worksheet) As ListObject
     Dim lastRow As Long
 
     On Error Resume Next
-    Set lo = ws.ListObjects("tblERROR_LOGS")
+    Set lo = ws.ListObjects(TBL_ERROR_LOGS)
     On Error GoTo 0
 
     If lo Is Nothing Then
-        hdr = Array("time", "user", "err number", "src", "description")
+        hdr = GetErrorLogsHeaders()
         ws.Range("A1:E1").Value = hdr
         ws.Range("A1:E1").Font.Bold = True
         Set lo = ws.ListObjects.Add(xlSrcRange, ws.Range("A1:E2"), , xlYes)
-        lo.Name = "tblERROR_LOGS"
+        lo.Name = TBL_ERROR_LOGS
         lo.TableStyle = "TableStyleLight9"
         If lo.ListRows.Count > 0 Then lo.ListRows(1).Delete
         ws.Columns("A:E").EntireColumn.AutoFit
@@ -137,6 +137,25 @@ End Sub
 Public Function FileExists(path As String) As Boolean
     FileExists = (Dir(path) <> "")
 End Function
+
+Public Sub ReleaseSuiviCRLockIfOwned()
+    Dim wsCR As Worksheet
+    Dim v As String
+    Dim minePrefix As String
+
+    On Error Resume Next
+    Set wsCR = ThisWorkbook.Sheets(SH_CR)
+    If wsCR Is Nothing Then Exit Sub
+
+    v = CStr(wsCR.Range(LOCK_CELL_ADDR).Value & "")
+    minePrefix = LOCK_PREFIX & Environ$("USERNAME")
+    If Left$(v, Len(minePrefix)) <> minePrefix Then Exit Sub
+
+    wsCR.Unprotect Password:=PROTECT_PASSWORD
+    wsCR.Range(LOCK_CELL_ADDR).ClearContents
+    Err.Clear
+    On Error GoTo 0
+End Sub
 
 ' Waits until lock cell is cleared by another running update.
 Public Sub WaitWhileLocked(wsCR As Worksheet, ByVal lockCell As String)

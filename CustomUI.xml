@@ -10,9 +10,13 @@
         </group> -->
         <group id="SuiviGroup" label="Suivi">
           <button id="BtnUpdate" imageMso="TableInsertRowsAbove" size="large"
-                  label="Mise à jour"
+                  label="MAJ Suivi Livrables"
                   screentip="Lancer la mise à jour du Suivi Livrables à partir du Suivi CR"
                   onAction="Ribbon_UpdateSuivi"/>
+          <button id="BtnUpdateAvancement" imageMso="RefreshAll" size="large"
+                  label="MAJ Avancement (colonne K)"
+                  screentip="Mettre à jour uniquement la colonne K (Avancement) du Suivi Livrables"
+                  onAction="Ribbon_UpdateSLAvancement"/>
           <button id="BtnArchive" imageMso="Clear" size="large"
                   label="Archiver"
                   screentip="Archiver les données du Suivi Livrables"

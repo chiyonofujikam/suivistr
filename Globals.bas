@@ -8,6 +8,7 @@ Public Const SH_UVR        As String = "PowQ_Suivi_UVR"
 Public Const SH_VHST       As String = "PowQ_EDU_CE_VHST"
 Public Const SH_BN         As String = "BN_Suivi dossier Safety"
 Public Const SH_CONFIG     As String = "config"
+Public Const SH_ERROR_LOGS As String = "ERROR_LOGS"
 
 ' Input sheet names used by update flows.
 Public Const SH_IN_EXTRACT As String = "Extract"
@@ -18,6 +19,7 @@ Public Const SH_IN_VHST  As String = "Références_CE_VHST"
 Public Const TBL_EXTRACT   As String = "Extract_MSP"
 Public Const TBL_UVR       As String = "Suivi_UVR"
 Public Const TBL_EDU       As String = "EDU_CE_VHST"
+Public Const TBL_ERROR_LOGS As String = "tblERROR_LOGS"
 
 ' UVR source layout in input sheet.
 Public Const UVR_HEADER_ROW As Long = 12
@@ -120,4 +122,8 @@ End Function
 
 Public Function GetPowQEduHeaders() As Variant
     GetPowQEduHeaders = Array(HDR_NOM_STR, HDR_SPRINTS, HDR_COLLABORATEURS, HDR_SOCIETES, HDR_INFO_COMPLET)
+End Function
+
+Public Function GetErrorLogsHeaders() As Variant
+    GetErrorLogsHeaders = Array("Time", "User", "Error Number", "Source", "Description")
 End Function
