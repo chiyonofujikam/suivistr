@@ -179,7 +179,7 @@ Private Function IsWorksheetEmpty(ByVal ws As Worksheet) As Boolean
     On Error GoTo 0
 End Function
 
-' Gets worksheet by name and returns True when found.
+' Resolve worksheet by name.
 Private Function TryGetWorksheet(ByVal wb As Workbook, ByVal sheetName As String, ByRef ws As Worksheet) As Boolean
     On Error Resume Next
     Set ws = wb.Worksheets(sheetName)
@@ -228,7 +228,7 @@ Private Sub PowQBatchFinish()
     If m_PowQBatchStatus Is Nothing Then Exit Sub
 
     allOk = True
-    summary = "Statut PowQ Tout :" & vbCrLf & vbCrLf
+    summary = HEADER_STATUT_POWQ_TOUT & vbCrLf & vbCrLf
     For Each p In m_PowQBatchStatus.Keys
         statusText = CStr(m_PowQBatchStatus(p))
         summary = summary & "- " & CStr(p) & " : " & statusText & vbCrLf
@@ -236,9 +236,9 @@ Private Sub PowQBatchFinish()
     Next p
 
     If allOk Then
-        VBA.Interaction.MsgBox summary, vbInformation, "PowQ Tout"
+        VBA.Interaction.MsgBox summary, vbInformation, TITLE_POWQ_TOUT
     Else
-        VBA.Interaction.MsgBox summary, vbExclamation, "PowQ Tout"
+        VBA.Interaction.MsgBox summary, vbExclamation, TITLE_POWQ_TOUT
     End If
 
     m_PowQBatchMode = False
@@ -266,8 +266,142 @@ Private Function MsgBox(Prompt As String, Optional Buttons As VbMsgBoxStyle = vb
     End If
 End Function
 
+' Strip outer quotes from config path text.
+Private Function NormalizePowQConfigPath(ByVal s As String) As String
+    s = Trim$(CStr(s))
+    Do While Len(s) >= 2
+        If (Left$(s, 1) = """" And Right$(s, 1) = """") Then
+            s = Trim$(Mid$(s, 2, Len(s) - 2))
+        ElseIf (Left$(s, 1) = "'" And Right$(s, 1) = "'") Then
+            s = Trim$(Mid$(s, 2, Len(s) - 2))
+        Else
+            Exit Do
+        End If
+    Loop
+    NormalizePowQConfigPath = Trim$(s)
+End Function
 
-' Rebuilds PowQ_Extract from a selected input workbook.
+' True if folderPath exists and is a directory.
+Private Function PowQFolderExists(ByVal folderPath As String) As Boolean
+    Dim attr As Long
+    If Len(folderPath) = 0 Then Exit Function
+    On Error Resume Next
+    Err.Clear
+    attr = GetAttr(folderPath)
+    If Err.Number <> 0 Then Exit Function
+    PowQFolderExists = ((attr And vbDirectory) = vbDirectory)
+End Function
+
+' Folder for file dialog (from file or directory path).
+Private Function ResolvePowQDialogFolder(ByVal rawConfigValue As String) As String
+    Dim p As String
+    Dim sepPos As Long
+    Dim a As Long
+    Dim b As Long
+    Dim attr As Long
+
+    p = NormalizePowQConfigPath(rawConfigValue)
+    If Len(p) = 0 Then Exit Function
+
+    On Error Resume Next
+    Err.Clear
+    attr = GetAttr(p)
+    If Err.Number = 0 Then
+        If (attr And vbDirectory) = vbDirectory Then
+            ResolvePowQDialogFolder = p
+        Else
+            a = InStrRev(p, "\")
+            b = InStrRev(p, "/")
+            sepPos = IIf(a > b, a, b)
+            If sepPos > 0 Then ResolvePowQDialogFolder = Left$(p, sepPos - 1)
+        End If
+        Exit Function
+    End If
+    Err.Clear
+    On Error GoTo 0
+
+    a = InStrRev(p, "\")
+    b = InStrRev(p, "/")
+    sepPos = IIf(a > b, a, b)
+    If sepPos > 0 Then ResolvePowQDialogFolder = Left$(p, sepPos - 1)
+End Function
+
+' Select Input Dossier on config sheet.
+Private Sub NavigateToPowQInputDossier()
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(SH_CONFIG)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+    On Error Resume Next
+    If ws.Visible <> xlSheetVisible Then ws.Visible = xlSheetVisible
+    ws.Activate
+    ws.Range(RNG_POWQ_INPUT_DOSSIER).Select
+    ActiveWindow.ScrollRow = ws.Range(RNG_POWQ_INPUT_DOSSIER).Row
+    ActiveWindow.ScrollColumn = ws.Range(RNG_POWQ_INPUT_DOSSIER).Column
+    On Error GoTo 0
+End Sub
+
+' ChDir then dialog; False = abort (empty D2, missing folder, ChDir fail). skip = no repeat empty MsgBox (PowQ Tout 2–3).
+Private Function ApplyPowQOpenDialogInitialFolder(Optional ByVal skipEmptyInputDossierWarning As Boolean = False) As Boolean
+    Dim raw As String
+    Dim folderPath As String
+
+    ApplyPowQOpenDialogInitialFolder = False
+
+    On Error Resume Next
+    raw = CStr(ThisWorkbook.Worksheets(SH_CONFIG).Range(RNG_POWQ_INPUT_DOSSIER).Value2 & "")
+    On Error GoTo 0
+
+    If Len(NormalizePowQConfigPath(raw)) = 0 Then
+        If Not skipEmptyInputDossierWarning Then
+            MsgBox _
+                "La cellule « " & LABEL_POWQ_INPUT_DOSSIER & " » de la feuille « " & SH_CONFIG & " » est vide." & vbCrLf & vbCrLf & _
+                MSG_POWQ_INPUT_DOSSIER_EMPTY_BODY, _
+                vbExclamation, _
+                TITLE_POWQ_CONFIG
+            NavigateToPowQInputDossier
+        End If
+        Exit Function
+    End If
+
+    folderPath = ResolvePowQDialogFolder(raw)
+    If Len(folderPath) > 0 Then
+        If Not PowQFolderExists(folderPath) Then
+            MsgBox _
+                "Le dossier pour « " & LABEL_POWQ_INPUT_DOSSIER & " » est introuvable ou inaccessible." & vbCrLf & vbCrLf & _
+                MSG_POWQ_INPUT_DOSSIER_FOLDER_MISSING_BODY, _
+                vbExclamation, _
+                TITLE_POWQ_CONFIG
+            NavigateToPowQInputDossier
+            Exit Function
+        End If
+        On Error Resume Next
+        Err.Clear
+        If Len(folderPath) >= 2 Then
+            If Mid$(folderPath, 2, 1) = ":" Then
+                ChDrive Left$(folderPath, 1)
+            End If
+        End If
+        ChDir folderPath
+        If Err.Number <> 0 Then
+            Err.Clear
+            MsgBox _
+                "Impossible d'ouvrir le dossier pour « " & LABEL_POWQ_INPUT_DOSSIER & " »." & vbCrLf & vbCrLf & _
+                MSG_POWQ_INPUT_DOSSIER_FOLDER_MISSING_BODY, _
+                vbExclamation, _
+                TITLE_POWQ_CONFIG
+            NavigateToPowQInputDossier
+            On Error GoTo 0
+            Exit Function
+        End If
+        On Error GoTo 0
+    End If
+    ApplyPowQOpenDialogInitialFolder = True
+End Function
+
+
+' Import workbook → PowQ_Extract.
 Sub Update_PowQ_Exract(Optional ByVal externalWorkbookPath As String = "", Optional ByVal inputSheetName As String = "")
     Dim inputFilePath As Variant
     Dim wbInput As Workbook
@@ -298,8 +432,9 @@ Sub Update_PowQ_Exract(Optional ByVal externalWorkbookPath As String = "", Optio
     If Len(externalWorkbookPath) > 0 Then
         inputFilePath = externalWorkbookPath
     Else
+        If Not ApplyPowQOpenDialogInitialFolder() Then Exit Sub
         inputFilePath = Application.GetOpenFilename( _
-            FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
+            FileFilter:=FILTER_POWQ_EXCEL, _
             Title:="Sélectionner le fichier d'entrée PowQ")
     End If
 
@@ -631,7 +766,7 @@ Private Sub ApplyBilanPerimetrePowQValidation()
     Dim targetCell As Range
 
     On Error Resume Next
-    Set wsBilan = ThisWorkbook.Worksheets("Bilan Périmètre")
+    Set wsBilan = ThisWorkbook.Worksheets(SH_BILAN_PERIMETRE)
     Set wsVHST = ThisWorkbook.Worksheets(SH_VHST)
     On Error GoTo 0
 
@@ -684,8 +819,9 @@ Sub Update_PowQ_EDU_CE_VHST(Optional ByVal externalWorkbookPath As String = "", 
     If Len(externalWorkbookPath) > 0 Then
         inputFilePath = externalWorkbookPath
     Else
+        If Not ApplyPowQOpenDialogInitialFolder() Then Exit Sub
         inputFilePath = Application.GetOpenFilename( _
-            FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
+            FileFilter:=FILTER_POWQ_EXCEL, _
             Title:="Sélectionner le fichier d'entrée EDU_CE_VHST")
     End If
 
@@ -850,7 +986,7 @@ Cleanup:
     End If
 End Sub
 
-
+' Import workbook → PowQ_Suivi_UVR.
 Sub Update_PowQ_Suivi_UVR(Optional ByVal externalWorkbookPath As String = "", Optional ByVal inputSheetName As String = "")
     Dim inputFilePath As Variant
     Dim wbInput As Workbook
@@ -898,8 +1034,9 @@ Sub Update_PowQ_Suivi_UVR(Optional ByVal externalWorkbookPath As String = "", Op
     If Len(externalWorkbookPath) > 0 Then
         inputFilePath = externalWorkbookPath
     Else
+        If Not ApplyPowQOpenDialogInitialFolder() Then Exit Sub
         inputFilePath = Application.GetOpenFilename( _
-            FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
+            FileFilter:=FILTER_POWQ_EXCEL, _
             Title:="Sélectionner le fichier d'entrée UVR")
     End If
 
@@ -1144,13 +1281,13 @@ Sub Update_PowQ_All()
     Dim inputFileEDU As String
     Dim inputFileExtract As String
     Dim inputFileUVR As String
-    inputFileEDU = PickPowQInputFile("PowQ Tout - Sélectionner le fichier EDU_CE_VHST")
+    inputFileEDU = PickPowQInputFile(DLG_POWQ_TOUT_EDU)
     If Len(inputFileEDU) = 0 Then Exit Sub
 
-    inputFileUVR = PickPowQInputFile("PowQ Tout - Sélectionner le fichier UVR (Global)")
+    inputFileUVR = PickPowQInputFile(DLG_POWQ_TOUT_UVR, True)
     If Len(inputFileUVR) = 0 Then Exit Sub
 
-    inputFileExtract = PickPowQInputFile("PowQ Tout - Sélectionner le fichier Extract")
+    inputFileExtract = PickPowQInputFile(DLG_POWQ_TOUT_EXTRACT, True)
     If Len(inputFileExtract) = 0 Then Exit Sub
     If Not ConfirmPowQAllFiles(inputFileEDU, inputFileUVR, inputFileExtract) Then Exit Sub
 
@@ -1164,10 +1301,11 @@ Sub Update_PowQ_All()
     PowQBatchFinish
 End Sub
 
-Private Function PickPowQInputFile(ByVal dialogTitle As String) As String
+Private Function PickPowQInputFile(ByVal dialogTitle As String, Optional ByVal skipEmptyInputDossierWarning As Boolean = False) As String
     Dim picked As Variant
+    If Not ApplyPowQOpenDialogInitialFolder(skipEmptyInputDossierWarning) Then Exit Function
     picked = Application.GetOpenFilename( _
-        FileFilter:="Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm", _
+        FileFilter:=FILTER_POWQ_EXCEL, _
         Title:=dialogTitle)
     If VarType(picked) = vbBoolean Then
         If CBool(picked) = False Then
@@ -1181,11 +1319,11 @@ End Function
 Private Function ConfirmPowQAllFiles(ByVal fileEDU As String, ByVal fileUVR As String, ByVal fileExtract As String) As Boolean
     Dim resp As VbMsgBoxResult
     resp = VBA.Interaction.MsgBox( _
-        "Confirmer les fichiers PowQ Tout :" & vbCrLf & vbCrLf & _
+        HEADER_CONFIRM_POWQ_TOUT & vbCrLf & vbCrLf & _
         "EDU_CE_VHST :" & vbCrLf & Dir$(fileEDU) & vbCrLf & vbCrLf & _
         "UVR (Global) :" & vbCrLf & Dir$(fileUVR) & vbCrLf & vbCrLf & _
         "Extract :" & vbCrLf & Dir$(fileExtract), _
         vbYesNo + vbQuestion + vbDefaultButton2, _
-        "Confirmation PowQ Tout")
+        TITLE_POWQ_TOUT_CONFIRM)
     ConfirmPowQAllFiles = (resp = vbYes)
 End Function

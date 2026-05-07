@@ -9,6 +9,26 @@ Public Const SH_VHST       As String = "PowQ_EDU_CE_VHST"
 Public Const SH_BN         As String = "BN_Suivi dossier Safety"
 Public Const SH_CONFIG     As String = "config"
 Public Const SH_ERROR_LOGS As String = "ERROR_LOGS"
+Public Const SH_BILAN_PERIMETRE As String = "Bilan Périmètre"
+
+' PowQ: Input Dossier cell + dialog strings.
+Public Const RNG_POWQ_INPUT_DOSSIER As String = "D2"
+Public Const LABEL_POWQ_INPUT_DOSSIER As String = "Input Dossier"
+Public Const TITLE_POWQ_CONFIG As String = "Configuration PowQ"
+Public Const TITLE_POWQ_TOUT As String = "PowQ Tout"
+Public Const TITLE_POWQ_TOUT_CONFIRM As String = "Confirmation PowQ Tout"
+Public Const FILTER_POWQ_EXCEL As String = "Fichiers Excel (*.xls;*.xlsx;*.xlsm),*.xls;*.xlsx;*.xlsm"
+Public Const HEADER_STATUT_POWQ_TOUT As String = "Statut PowQ Tout :"
+Public Const HEADER_CONFIRM_POWQ_TOUT As String = "Confirmer les fichiers PowQ Tout :"
+Public Const DLG_POWQ_TOUT_EDU As String = "PowQ Tout - Sélectionner le fichier EDU_CE_VHST"
+Public Const DLG_POWQ_TOUT_UVR As String = "PowQ Tout - Sélectionner le fichier UVR (Global)"
+Public Const DLG_POWQ_TOUT_EXTRACT As String = "PowQ Tout - Sélectionner le fichier Extract"
+Public Const MSG_POWQ_INPUT_DOSSIER_EMPTY_BODY As String = _
+    "Veuillez y renseigner le chemin du dossier ou du fichier d'entrée PowQ " & _
+    "(emplacement commun aux mises à jour EDU, UVR et Extract), " & _
+    "afin que la sélection de fichier démarre au bon dossier."
+Public Const MSG_POWQ_INPUT_DOSSIER_FOLDER_MISSING_BODY As String = _
+    "Vérifiez que le dossier ou le fichier d'entrée existe et que le chemin est correct dans la feuille « config »."
 
 ' Input sheet names used by update flows.
 Public Const SH_IN_EXTRACT As String = "Extract"
